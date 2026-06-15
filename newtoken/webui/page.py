@@ -71,7 +71,6 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
             <button onclick="applyAcc()">保存 ACC</button>
             <button class="secondary" onclick="loadMembers()">加载成员</button>
             <button class="warn" data-action="low_quota_policy" onclick="startTask('low_quota_policy')">立即运行策略</button>
-            <button class="warn" data-action="auto_maintenance" onclick="startTask('auto_maintenance')">完整自动维护</button>
           </div>
         </div>
         <div id="acc_members"><div class="empty">等待加载成员</div></div>
@@ -165,11 +164,6 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
         <div><label>自动策略</label><select id="cfg_auto_policy_enabled"><option value="true" {view['auto_policy_enabled_true']}>开启</option><option value="false" {view['auto_policy_enabled_false']}>关闭</option></select></div>
         <div><label>策略间隔秒</label><input id="cfg_auto_policy_interval" value="{view['auto_policy_interval']}"></div>
         <div><label>启动后执行</label><select id="cfg_auto_policy_run_on_start"><option value="true" {view['auto_policy_run_on_start_true']}>开启</option><option value="false" {view['auto_policy_run_on_start_false']}>关闭</option></select></div>
-        <div><label>OIDC API 地址</label><input id="cfg_oidc_api_url" value="{view['oidc_api_url']}" placeholder="https://oidc.你的域名.com"></div>
-        <div><label>OIDC API Key</label><input id="cfg_oidc_api_key" value="" type="password" placeholder="{view['oidc_api_key_placeholder']}"></div>
-        <div><label>自动注册域名</label><input id="cfg_auto_register_domain" value="{view['auto_register_domain']}" placeholder="@team.edu.sixoner.com"></div>
-        <div><label>注册批次数</label><input id="cfg_auto_register_count" value="{view['auto_register_count']}"></div>
-        <div><label>存活阈值</label><input id="cfg_auto_register_threshold" value="{view['auto_register_threshold']}"></div>
       </div>
       <div class="toolbar">
         <button onclick="saveConfig()">保存配置</button>
@@ -218,13 +212,6 @@ def build_index_view(values: dict[str, str], state: WebState) -> dict[str, str]:
         ),
         "auto_policy_run_on_start_false": (
             "selected" if str(values.get("SUB2API_AUTO_POLICY_RUN_ON_START", "true")).lower() == "false" else ""
-        ),
-        "auto_register_count": html_escape(values.get("SUB2API_AUTO_REGISTER_COUNT", "3")),
-        "auto_register_threshold": html_escape(values.get("SUB2API_AUTO_REGISTER_THRESHOLD", "1")),
-        "auto_register_domain": html_escape(values.get("SUB2API_AUTO_REGISTER_DOMAIN", "")),
-        "oidc_api_url": html_escape(values.get("SUB2API_OIDC_API_URL", "")),
-        "oidc_api_key_placeholder": html_escape(
-            "已保存，输入新值替换" if values.get("SUB2API_OIDC_API_KEY") else ""
         ),
         "group_ids": html_escape(values.get("SUB2API_GROUP_IDS", "")),
         "import_concurrency": html_escape(values.get("SUB2API_IMPORT_CONCURRENCY", "50")),
