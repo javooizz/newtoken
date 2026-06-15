@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'active',
     activated_by_card_id BIGINT UNSIGNED NULL,
+    origin_client_id VARCHAR(128) NULL,
     activated_at DATETIME NULL,
     last_login_at DATETIME NULL,
     created_at DATETIME NOT NULL,
@@ -102,4 +103,29 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     KEY idx_audit_actor (actor_type, actor_id),
     KEY idx_audit_action (action),
     KEY idx_audit_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS oidc_clients (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    client_id VARCHAR(128) NOT NULL,
+    client_secret_enc TEXT NOT NULL,
+    name VARCHAR(190) NOT NULL,
+    redirect_uris TEXT NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    note VARCHAR(255) NULL,
+    created_by_admin_id BIGINT UNSIGNED NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uq_oidc_clients_client_id (client_id),
+    KEY idx_oidc_clients_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS oidc_client_domains (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    client_id VARCHAR(128) NOT NULL,
+    domain_normalized VARCHAR(255) NOT NULL,
+    domain_raw VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE KEY uq_client_domains_norm (domain_normalized),
+    KEY idx_client_domains_client (client_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
