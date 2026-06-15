@@ -12,6 +12,7 @@ const actionStatus = {
   delete_auth_error: 'remote_status',
   delete_dead: 'remote_status',
   auto_maintenance: 'remote_status',
+  register_accounts: 'register_status',
   low_quota_policy: 'acc_status',
   convert: 'convert_status',
   import_cached: 'convert_status',
@@ -23,7 +24,8 @@ const actionNames = {
   delete_no_quota: '删除无额度',
   delete_auth_error: '删除 401',
   delete_dead: '删除死号',
-  auto_maintenance: '自动维护',
+  auto_maintenance: '远程扫描',
+  register_accounts: '自动注册',
   low_quota_policy: '席位策略',
   convert: '转换校验',
   import_cached: '缓存导入',
@@ -144,11 +146,14 @@ function renderTaskResult(task) {
   if (task.label.startsWith('import')) setText('convert_status', '导入完成');
   if (task.label === 'auto_maintenance') {
     const health = result.health || {};
-    setText('remote_status', `维护完成：活 ${health.alive || 0} | 死 ${health.dead || 0} | 低额度 ${health.low_quota || 0}`);
+    setText('remote_status', `维护：活 ${health.alive || 0} | 死 ${health.dead || 0} | 低 ${health.low_quota || 0}`);
     const offline = result.offline || {};
-    if (offline.offlined) setText('remote_status', `维护完成：下线 ${offline.offlined} 个 | 活 ${health.alive || 0}`);
+    if (offline.offlined) setText('remote_status', `维护：下线 ${offline.offlined} | 活 ${health.alive || 0}`);
   }
-    renderMembers(result.members || []);
+  if (task.label === 'register_accounts') {
+    setText('register_status', `注册完成：${result.success || 0}/${result.registered || 0}`);
+  }
+  if (task.label === 'low_quota_policy') {
     const changed = (result.changed_members || []).length;
     const capped = (result.limit_changed_members || []).length;
     setText('acc_status', `策略完成：低额度 ${result.low_quota_count}，改 Codex ${changed + capped}，ChatGPT ${result.chatgpt_count}/${result.chatgpt_limit}`);
