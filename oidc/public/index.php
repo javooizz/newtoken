@@ -20,38 +20,43 @@ function app_parse_csvish($value)
 function app_build_config_from_request(array $source, array $existing = [])
 {
     $appUrl = rtrim(trim((string) $source['app_url']), '/');
-    $domains = app_parse_csvish(isset($source['allowed_email_domains']) ? $source['allowed_email_domains'] : '');
-    $redirects = app_parse_csvish(isset($source['oidc_redirect_uris']) ? $source['oidc_redirect_uris'] : '');
 
     return [
-        'app_env' => isset($existing['app_env']) ? $existing['app_env'] : 'production',
-        'app_debug' => isset($existing['app_debug']) ? $existing['app_debug'] : false,
+        'app_env' => $existing['app_env'] ?? 'production',
+        'app_debug' => $existing['app_debug'] ?? false,
         'app_url' => $appUrl,
-        'app_name' => isset($existing['app_name']) ? $existing['app_name'] : 'GPT OIDC',
-        'app_key' => isset($existing['app_key']) ? $existing['app_key'] : bin2hex(random_bytes(32)),
-        'app_pepper' => isset($existing['app_pepper']) ? $existing['app_pepper'] : bin2hex(random_bytes(32)),
-        'api_key' => trim((string) (isset($source['api_key']) ? $source['api_key'] : '')) !== ''
-            ? trim((string) $source['api_key'])
-            : (isset($existing['api_key']) && trim((string) $existing['api_key']) !== ''
-                ? trim((string) $existing['api_key'])
-                : bin2hex(random_bytes(32))),
+        'app_name' => $existing['app_name'] ?? 'GPT OIDC',
+        'app_key' => $existing['app_key'] ?? bin2hex(random_bytes(32)),
+        'app_pepper' => $existing['app_pepper'] ?? bin2hex(random_bytes(32)),
+        'cards_api_key' => app_pick_key($source['cards_api_key'] ?? '', $existing['cards_api_key'] ?? ($existing['api_key'] ?? '')),
+        'clients_admin_api_key' => app_pick_key($source['clients_admin_api_key'] ?? '', $existing['clients_admin_api_key'] ?? ''),
+        'clients_admin_ip_allowlist' => $existing['clients_admin_ip_allowlist'] ?? [],
+        'clients_secret_reveal_enabled' => $existing['clients_secret_reveal_enabled'] ?? false,
         'db_host' => trim((string) $source['db_host']),
         'db_port' => (int) $source['db_port'],
         'db_name' => trim((string) $source['db_name']),
         'db_user' => trim((string) $source['db_user']),
         'db_pass' => (string) $source['db_pass'],
-        'session_name' => isset($existing['session_name']) ? $existing['session_name'] : 'GPTOIDCSESSID',
-        'allowed_email_domains' => $domains,
+        'session_name' => $existing['session_name'] ?? 'GPTOIDCSESSID',
         'oidc_issuer' => !empty($source['oidc_issuer']) ? rtrim(trim((string) $source['oidc_issuer']), '/') : $appUrl,
-        'oidc_client_id' => trim((string) $source['oidc_client_id']),
-        'oidc_client_secret' => trim((string) $source['oidc_client_secret']),
-        'oidc_allowed_redirect_uris' => $redirects ?: ['https://chatgpt.com/'],
         'oidc_access_token_ttl' => !empty($source['oidc_access_token_ttl']) ? (int) $source['oidc_access_token_ttl'] : 600,
         'oidc_id_token_ttl' => !empty($source['oidc_id_token_ttl']) ? (int) $source['oidc_id_token_ttl'] : 600,
         'oidc_auth_code_ttl' => !empty($source['oidc_auth_code_ttl']) ? (int) $source['oidc_auth_code_ttl'] : 90,
-        'jwt_private_key_path' => isset($existing['jwt_private_key_path']) ? $existing['jwt_private_key_path'] : dirname(__DIR__) . '/storage/keys/private.pem',
-        'jwt_public_key_path' => isset($existing['jwt_public_key_path']) ? $existing['jwt_public_key_path'] : dirname(__DIR__) . '/storage/keys/public.pem',
+        'jwt_private_key_path' => $existing['jwt_private_key_path'] ?? dirname(__DIR__) . '/storage/keys/private.pem',
+        'jwt_public_key_path' => $existing['jwt_public_key_path'] ?? dirname(__DIR__) . '/storage/keys/public.pem',
     ];
+}
+
+function app_pick_key($provided, $existing)
+{
+    $provided = trim((string) $provided);
+    if ($provided !== '') {
+        return $provided;
+    }
+    if (trim((string) $existing) !== '') {
+        return (string) $existing;
+    }
+    return bin2hex(random_bytes(32));
 }
 
 function app_validate_install_payload(array $source)
@@ -59,15 +64,9 @@ function app_validate_install_payload(array $source)
     if (trim((string) $source['app_url']) === '' || trim((string) $source['db_name']) === '' || trim((string) $source['db_user']) === '' || trim((string) $source['admin_username']) === '' || trim((string) $source['admin_email']) === '' || (string) $source['admin_password'] === '') {
         throw new RuntimeException('请填写所有必填安装项。');
     }
-
-    if (empty(app_parse_csvish(isset($source['allowed_email_domains']) ? $source['allowed_email_domains'] : ''))) {
-        throw new RuntimeException('至少要填写一个允许登录的邮箱后缀。');
-    }
-
     if (!filter_var((string) $source['admin_email'], FILTER_VALIDATE_EMAIL)) {
         throw new RuntimeException('管理员邮箱格式不正确。');
     }
-
     if (strlen((string) $source['admin_password']) < 10) {
         throw new RuntimeException('管理员密码至少需要 10 位。');
     }
@@ -77,14 +76,6 @@ function app_validate_config_payload(array $config)
 {
     if (trim((string) $config['app_url']) === '' || trim((string) $config['oidc_issuer']) === '') {
         throw new RuntimeException('应用地址和 OIDC Issuer 不能为空。');
-    }
-
-    if (empty($config['allowed_email_domains'])) {
-        throw new RuntimeException('至少要配置一个允许登录的邮箱后缀。');
-    }
-
-    if (empty($config['oidc_allowed_redirect_uris'])) {
-        throw new RuntimeException('至少要配置一个允许的回调地址。');
     }
 }
 
