@@ -34,6 +34,7 @@ from sub2api_converter_core import (
 )
 from sub2api_converter_remote import load_remote_import_defaults
 from sub2api_converter_remote_ui import RemoteUIActionsMixin
+from sub2api_first_run_setup import bring_window_to_front, center_window
 
 __all__ = [
     "CAP_OUTPUT_MODE",
@@ -184,6 +185,12 @@ class ConverterApp(RemoteUIActionsMixin):
         self.root.title(window_title)
         self.root.geometry(window_geometry)
         self.root.minsize(*window_minsize)
+        center_window(
+            self.root,
+            preferred_width=int(str(window_geometry).split("x", 1)[0]),
+            preferred_height=int(str(window_geometry).split("x", 1)[1]),
+        )
+        self.root.after(120, self.ensure_window_visible)
         self.update_context_file = __file__
         self.openai_oauth_window = None
         self.show_local_tools = show_local_tools
@@ -474,6 +481,11 @@ class ConverterApp(RemoteUIActionsMixin):
         self.update_remote_buttons_state()
         self.root.after(100, self.poll_queue)
         self.root.after(300, self.maybe_auto_refresh_remote_stats)
+
+    def ensure_window_visible(self):
+        """启动后把主窗口提到前台，避免看起来像没打开。"""
+
+        bring_window_to_front(self.root)
 
     def handle_input_path_changed(self, *_args):
         self.reset_cached_result()

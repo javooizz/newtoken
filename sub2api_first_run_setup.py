@@ -58,6 +58,52 @@ REQUIRED_ENV_KEYS = (
 )
 
 
+def center_window(window: tk.Misc, *, preferred_width: int, preferred_height: int) -> None:
+    """把窗口放到屏幕中央，避免首启窗口跑到屏幕外。"""
+
+    window.update_idletasks()
+    current_width = max(
+        int(getattr(window, "winfo_width", lambda: 0)() or 0),
+        int(getattr(window, "winfo_reqwidth", lambda: 0)() or 0),
+        int(preferred_width),
+    )
+    current_height = max(
+        int(getattr(window, "winfo_height", lambda: 0)() or 0),
+        int(getattr(window, "winfo_reqheight", lambda: 0)() or 0),
+        int(preferred_height),
+    )
+    screen_width = max(int(window.winfo_screenwidth() or 0), current_width)
+    screen_height = max(int(window.winfo_screenheight() or 0), current_height)
+    offset_x = max((screen_width - current_width) // 2, 0)
+    offset_y = max((screen_height - current_height) // 2, 0)
+    window.geometry(f"{current_width}x{current_height}+{offset_x}+{offset_y}")
+
+
+def bring_window_to_front(window: tk.Misc) -> None:
+    """尽量把窗口提到前台，避免用户误以为程序没打开。"""
+
+    try:
+        window.deiconify()
+    except tk.TclError:
+        return
+    try:
+        window.lift()
+        window.focus_force()
+        window.attributes("-topmost", True)
+        window.after(1200, lambda: _clear_topmost(window))
+    except tk.TclError:
+        return
+
+
+def _clear_topmost(window: tk.Misc) -> None:
+    """取消临时 topmost，避免窗口一直压最前。"""
+
+    try:
+        window.attributes("-topmost", False)
+    except tk.TclError:
+        return
+
+
 def parse_env_value(raw_value: str) -> str:
     """解析 .env 单行值。"""
 
@@ -201,6 +247,8 @@ class FirstRunSetupDialog:
         self.window.transient(root)
         self.window.grab_set()
         self.window.protocol("WM_DELETE_WINDOW", self.handle_skip)
+        center_window(self.window, preferred_width=760, preferred_height=520)
+        bring_window_to_front(self.window)
 
         container = ttk.Frame(self.window, padding=14)
         container.pack(fill="both", expand=True)

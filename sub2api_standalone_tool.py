@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """只保留 Sub2API 相关功能的独立桌面入口。"""
 
+import ctypes
 import os
 import sys
+import traceback
 from pathlib import Path
 from tkinter import ttk
 
@@ -17,8 +19,6 @@ PROJECT_DIR = get_app_dir(__file__)
 STANDALONE_DIR = chdir_to_app_dir(__file__)
 ensure_on_sys_path(PROJECT_DIR)
 ensure_on_sys_path(STANDALONE_DIR)
-if os.environ.get("SUB2API_SKIP_FIRST_RUN_SETUP", "").strip() != "1":
-    prepare_first_run_environment(__file__)
 
 from sub2api_converter import ConverterApp  # noqa: E402
 from sub2api_converter_openai_oauth_ui import OpenAIOAuthAccountPageWindow  # noqa: E402
@@ -74,5 +74,50 @@ class Sub2APIStandaloneApp(ConverterApp):
         self.log.write("已打开一键授权建号页\n")
 
 
+def write_startup_error_log(base_dir: str | Path, exc: BaseException) -> Path:
+    """把启动异常写到 exe 同目录，便于排查双击无反应。"""
+
+    target_dir = Path(base_dir).resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    log_path = target_dir / "startup_error.log"
+    error_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    lines = [
+        "Sub2API 独立工具启动失败",
+        "",
+        error_text.strip(),
+        "",
+    ]
+    log_path.write_text("\n".join(lines), encoding="utf-8")
+    return log_path
+
+
+def show_startup_error_message(log_path: Path) -> None:
+    """用系统弹窗提示用户去看启动日志。"""
+
+    try:
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            f"Sub2API 启动失败，错误日志已写入：\n{log_path}",
+            "Sub2API 启动失败",
+            0x10,
+        )
+    except Exception:
+        return
+
+
+def main() -> int:
+    """独立工具入口。"""
+
+    try:
+        if os.environ.get("SUB2API_SKIP_FIRST_RUN_SETUP", "").strip() != "1":
+            prepare_first_run_environment(__file__)
+        Sub2APIStandaloneApp().run()
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        log_path = write_startup_error_log(get_app_dir(__file__), exc)
+        show_startup_error_message(log_path)
+        raise
+
+
 if __name__ == "__main__":
-    Sub2APIStandaloneApp().run()
+    raise SystemExit(main())
