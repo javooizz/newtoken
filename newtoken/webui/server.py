@@ -193,7 +193,7 @@ class WebUIHandler(BaseHTTPRequestHandler):
     def _build_login_html(self, error_message: str = "") -> str:
         err = f"<p class='bad'>{html_escape(error_message)}</p>" if error_message else ""
         return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>登录</title>
-<style>body{{font-family:system-ui;margin:0;background:#f7f8fa;color:#172033}}main{{max-width:420px;margin:14vh auto;background:white;border:1px solid #d8dde6;border-radius:8px;padding:22px}}input,button{{width:100%;padding:10px;margin-top:8px;font:inherit}}button{{background:#0f766e;color:white;border:0;border-radius:6px}}.bad{{color:#b42318}}</style></head>
+<style>:root{{--bg:#eef2f6;--surface:#fff;--line:#d7dee8;--text:#17202f;--brand:#0f766e;--brand-2:#115e59;--danger:#b42318}}*{{box-sizing:border-box}}body{{font-family:system-ui;margin:0;background:var(--bg);color:var(--text)}}main{{max-width:420px;margin:14vh auto;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:22px}}input,button{{width:100%;padding:10px;margin-top:8px;font:inherit}}button{{background:var(--brand);color:white;border:0;border-radius:6px}}button:hover{{background:var(--brand-2)}}.bad{{color:var(--danger)}}</style></head>
 <body><main><h1>Sub2API WebUI</h1>{err}<form method="post" action="/login"><label>Web 密码</label><input name="password" type="password" autofocus><button>登录</button></form></main></body></html>"""
 
 

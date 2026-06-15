@@ -135,7 +135,7 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
       </div>
       <div class="grid two" style="margin-top:12px">
         <div><label>授权链接</label><input id="oauth_auth_url" readonly></div>
-        <div><label>状态</label><div class="pill" id="oauth_state_text" style="white-space:normal;height:36px;align-items:center">等待开始</div></div>
+        <div><label>状态</label><div class="oauth-state" id="oauth_state_text">等待开始</div></div>
       </div>
       <div style="margin-top:12px">
         <label>手动兜底：回调链接或 Code（回调不可达时使用）</label>
@@ -220,7 +220,6 @@ def build_index_view(values: dict[str, str], state: WebState) -> dict[str, str]:
         "oauth_group_name": html_escape(oauth_defaults.get("group_name", "cc")),
         "oauth_proxy_id": html_escape(oauth_defaults.get("proxy_id", "")),
         "oauth_proxy_url": html_escape(oauth_defaults.get("proxy_url", "")),
-        "oauth_redirect_uri": html_escape(oauth_defaults.get("redirect_uri", "")),
         "outbound_proxy": html_escape(values.get("SUB2API_OUTBOUND_PROXY_URL", "")),
         "outbound_proxy_masked": html_escape(
             config.get("SUB2API_OUTBOUND_PROXY_URL_MASKED", "-") or "-"

@@ -65,6 +65,11 @@ th, td { border-bottom: 1px solid var(--line); padding: 8px 9px; text-align: lef
 th { position: sticky; top: 0; background: var(--surface-2); color: var(--muted); z-index: 1; font-weight: 700; }
 tr:last-child td { border-bottom: 0; }
 .pill { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; background: var(--surface-2); color: var(--muted); font-size: 12px; }
+.pill.ok { background: #ecfdf5; border-color: var(--ok); color: var(--ok); }
+.pill.bad { background: #fef3f2; border-color: var(--danger); color: var(--danger); }
+.oauth-state { white-space: normal; min-height: 36px; display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); }
+.oauth-state.ok { background: #ecfdf5; border-color: var(--ok); color: var(--ok); }
+.oauth-state.bad { background: #fef3f2; border-color: var(--danger); color: var(--danger); }
 .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
 .mini { font-size: 12px; color: var(--muted); }
 .compact { max-width: 160px; }
@@ -73,11 +78,15 @@ tr:last-child td { border-bottom: 0; }
 .task strong { font-size: 13px; }
 .task small { color: var(--muted); }
 .empty { color: var(--muted); padding: 14px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); }
+.fold { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1280px) {
+  .grid, .fold { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 1080px) {
   .app { grid-template-columns: 1fr; }
   aside { position: static; height: auto; }
   nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .grid, .grid.two, .stats, .split { grid-template-columns: 1fr; }
+  .grid, .grid.two, .stats, .split, .fold { grid-template-columns: 1fr; }
   main { padding: 14px; }
 }
 """
@@ -291,25 +300,25 @@ function updateOauthUI(result) {
   const resetBtn = byId('oauth_reset_btn');
   switch (status) {
     case 'idle':
-      stateEl.textContent = '等待开始'; stateEl.className = 'pill';
+      stateEl.textContent = '等待开始'; stateEl.className = 'oauth-state';
       startBtn.disabled = false; startBtn.textContent = '开始授权建号'; resetBtn.style.display = 'none';
       break;
     case 'waiting_callback':
       stateEl.textContent = '已生成授权链接，请在新窗口完成登录授权';
-      stateEl.className = 'pill'; startBtn.disabled = true; startBtn.textContent = '等待授权中...'; resetBtn.style.display = '';
+      stateEl.className = 'oauth-state'; startBtn.disabled = true; startBtn.textContent = '等待授权中...'; resetBtn.style.display = '';
       break;
     case 'creating_account':
       stateEl.textContent = '已收到回调，正在创建 Sub2API 账号';
-      stateEl.className = 'pill'; startBtn.disabled = true; startBtn.textContent = '创建账号中...'; resetBtn.style.display = '';
+      stateEl.className = 'oauth-state'; startBtn.disabled = true; startBtn.textContent = '创建账号中...'; resetBtn.style.display = '';
       break;
     case 'done':
       stateEl.textContent = '建号完成 #' + (result.account_id || '--');
-      stateEl.className = 'pill ok'; startBtn.disabled = false; startBtn.textContent = '开始授权建号'; resetBtn.style.display = '';
+      stateEl.className = 'oauth-state ok'; startBtn.disabled = false; startBtn.textContent = '开始授权建号'; resetBtn.style.display = '';
       setText('oauth_status', '建号完成 #' + (result.account_id || '--'));
       break;
     case 'error':
       stateEl.textContent = '错误：' + (result.error || '未知');
-      stateEl.className = 'pill bad'; startBtn.disabled = false; startBtn.textContent = '开始授权建号'; resetBtn.style.display = '';
+      stateEl.className = 'oauth-state bad'; startBtn.disabled = false; startBtn.textContent = '开始授权建号'; resetBtn.style.display = '';
       setText('oauth_status', result.error || '未知错误', true);
       break;
   }
@@ -318,7 +327,7 @@ async function resetOauth() {
   stopOauthPolling();
   byId('oauth_auth_url').value = '';
   byId('oauth_state_text').textContent = '等待开始';
-  byId('oauth_state_text').className = 'pill';
+  byId('oauth_state_text').className = 'oauth-state';
   byId('oauth_start_btn').disabled = false;
   byId('oauth_start_btn').textContent = '开始授权建号';
   byId('oauth_reset_btn').style.display = 'none';
