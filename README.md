@@ -1,80 +1,75 @@
-# Sub2API WebUI
+# NewToken Linux WebUI
 
-Sub2API + ACC 席位自动维护工具。WebUI 默认监听 `28463`，适合 Linux / 宝塔面板部署。
+Sub2API + ACC 席位自动维护工具，带一个可独立部署的 OIDC 卡密登录服务。WebUI 默认监听 `28463`，适合 Linux / 宝塔面板部署。
 
-## 快速开始
+## 仓库包含什么
 
-```bash
-python entry.py --host 0.0.0.0 --port 28463
+```text
+entry.py                 WebUI 启动入口
+newtoken/                WebUI、ACC、Sub2API 对接源码
+oidc/                    GPT OIDC 卡密登录服务源码（PHP）
+scripts/                 辅助脚本
+tools/                   兼容工具入口
+DEPLOY.md                WebUI 宝塔部署说明
+oidc/DEPLOY_OIDC.md      OIDC 宝塔部署说明
 ```
 
-浏览器打开 `http://服务器IP:28463/`，先完成安装配置：
-
-- Sub2API 地址和管理员 API Key
-- 母号 ACC 信息：母号邮箱 + 直接粘贴 ACC JSON / HAR / Session / token
-- OIDC API 地址和 API Key
-- SOCKS5/socks5h 出站代理
-- 自动注册域名、补号数量、池子阈值
-- Web 密码、端口、自动维护周期
-
-保存后进入控制台，后台定时任务会自动运行，不需要手动刷新页面。
-
-## 功能
-
-- 首次安装向导：未安装前不能误进控制台
-- 完整自动维护：席位校正、远程扫描、自动补号、导入 Sub2API、生成 OIDC 卡
-- ACC 席位硬策略：ChatGPT 席位最多 2，Codex 不自动改回 ChatGPT
-- 低额度策略：额度低于 10% 自动停止 Sub2API 调用并改为 Codex
-- 远程账号扫描、异常清理、隐私同步
-- SOCKS5/socks5h 出站代理
-- WebUI CSRF 防护 + 密码登录
-
-## 配置
-
-建议先复制模板：
+## 快速启动 WebUI
 
 ```bash
 cp .env.example .env
+python entry.py --host 0.0.0.0 --port 28463
 ```
 
-关键配置：
-
-```ini
-SUB2API_BASE_URL=https://你的Sub2API
-SUB2API_ADMIN_API_KEY=sk-admin-xxx
-SUB2API_OUTBOUND_PROXY_URL=socks5://127.0.0.1:1080
-SUB2API_WEB_SECRET=强密码
-
-ACC_MOTHER_ACCOUNT_EMAIL=mother@example.com
-# OPENAI_* 由 WebUI 粘贴 ACC 内容后自动写入
-
-SUB2API_OIDC_API_URL=https://你的OIDC
-SUB2API_OIDC_API_KEY=...
-SUB2API_AUTO_REGISTER_DOMAIN=@team.example.com
-```
-
-完整配置见 `.env.example`。
-
-## 文档
-
-| 文档 | 内容 |
-|------|------|
-| [DEPLOY.md](./DEPLOY.md) | 宝塔面板部署教程 |
-| [CHANGELOG.md](./CHANGELOG.md) | 更新记录 |
-
-## 目录
+浏览器打开：
 
 ```text
-entry.py
-newtoken/
-  acc/
-  common/
-  sub2api/
-  webui/
-scripts/
-tools/
+http://服务器IP:28463/
 ```
+
+首次进入会先打开安装配置页。安装完成前不会进入控制台。
+
+## WebUI 必填配置
+
+- Sub2API 地址和管理员 API Key
+- 母号邮箱
+- 母号 ACC 内容：直接粘贴 ACC JSON / HAR / Session / token
+- OIDC API 地址和 API Key
+- SOCKS5/socks5h 出站代理（可选）
+- 自动注册邮箱域名、补号数量、池子阈值
+- Web 密码、监听地址、监听端口、自动维护周期
+
+保存后后台调度器会自动运行，不需要手动刷新页面。
+
+## OIDC 服务
+
+OIDC 是独立 PHP 服务，源码在 `oidc/`。它负责：
+
+- ChatGPT Business Custom OIDC 登录
+- 卡密生成、绑定、查询
+- 对 WebUI 暴露 `/api/status`、`/api/cards/generate`、`/api/cards/lookup`
+
+部署顺序建议：
+
+1. 先按 [oidc/DEPLOY_OIDC.md](./oidc/DEPLOY_OIDC.md) 部署 OIDC。
+2. 在 OIDC 后台复制 `api_key`。
+3. 再按 [DEPLOY.md](./DEPLOY.md) 部署 WebUI。
+4. WebUI 里填写 `SUB2API_OIDC_API_URL=https://你的OIDC域名` 和同一个 `api_key`。
+
+## 自动维护策略
+
+- ChatGPT 席位最多保留 2 个。
+- Codex 席位不会被自动改回 ChatGPT。
+- 额度低于 10% 的账号会停止 Sub2API 调用，并被改为 Codex。
+- 池子低于阈值时自动注册、导入 Sub2API、生成 OIDC 卡密。
+- 后台定时任务由服务端运行，浏览器关闭也不影响。
 
 ## 依赖
 
-基础 WebUI 尽量使用 Python 标准库。自动注册链路需要 `curl_cffi`。
+WebUI 基础功能尽量使用 Python 标准库，不依赖 Flask/FastAPI/requests。自动注册链路需要：
+
+```bash
+pip install curl_cffi
+```
+
+OIDC 服务需要 PHP + MySQL，详见 [oidc/PHP_SETUP.md](./oidc/PHP_SETUP.md)。

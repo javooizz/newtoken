@@ -1,6 +1,19 @@
 # Changelog
 ## 2026-06-15
 
+### 交付：补齐 OIDC 源码与部署文档
+
+**背景：** WebUI 已经有 OIDC 配置入口，但仓库缺少 OIDC 服务源码和部署说明，别人拿到项目后无法完整部署。
+
+**改动：**
+
+- 新增 `oidc/` 独立 PHP 服务源码、SQL 表结构、运行目录占位文件
+- 新增 `oidc/DEPLOY_OIDC.md` 和 `oidc/PHP_SETUP.md`
+- README 和 WebUI 部署文档补充 WebUI + OIDC 双服务部署顺序
+- OIDC 安装向导和后台设置新增 WebUI API Key 配置
+- OIDC API 认证错误统一返回 JSON，方便 WebUI 判断失败原因
+- `.gitignore` 忽略 OIDC 运行时配置、私钥、卡密导出和限流文件
+
 ### 重构：WebUI 安装向导与自动维护控制台
 
 **背景：** 旧 WebUI 把安装、配置、手动 OAuth 建号和日常运维混在一个页面里，容易让首次部署的人误操作，也不利于宝塔面板部署。
