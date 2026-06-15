@@ -45,6 +45,19 @@ def json_safe(value: Any) -> Any:
     return str(value)
 
 
+def parse_bool_text(value: Any, default: bool = False) -> bool:
+    """Parse common text booleans used by .env and browser forms."""
+
+    text = str(value or "").strip().lower()
+    if not text:
+        return bool(default)
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
 def parse_positive_int(value: Any, default: int, *, minimum: int = 1, maximum: int = 200) -> int:
     """Parse bounded positive int values from config or form text."""
 

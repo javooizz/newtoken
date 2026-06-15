@@ -144,7 +144,10 @@ async function saveConfig() {
       SUB2API_IMPORT_CONCURRENCY: formValue('cfg_import_concurrency'),
       SUB2API_VALIDATE_CONCURRENCY: formValue('cfg_validate_concurrency'),
       SUB2API_WEB_PORT: formValue('cfg_web_port'),
-      SUB2API_WEB_HOST: formValue('cfg_web_host')
+      SUB2API_WEB_HOST: formValue('cfg_web_host'),
+      SUB2API_AUTO_POLICY_ENABLED: formValue('cfg_auto_policy_enabled'),
+      SUB2API_AUTO_POLICY_INTERVAL_SECONDS: formValue('cfg_auto_policy_interval'),
+      SUB2API_AUTO_POLICY_RUN_ON_START: formValue('cfg_auto_policy_run_on_start')
     };
     const adminApiKey = formValue('cfg_api_key');
     if (adminApiKey) config.SUB2API_ADMIN_API_KEY = adminApiKey;
@@ -312,9 +315,32 @@ function formatTaskTime(task) {
   if (!finished) return '运行中';
   return Math.max(0, Math.round((finished - started) / 1000)) + 's';
 }
+function formatSchedulerTime(ts) {
+  const value = Number(ts || 0);
+  if (!value) return '--';
+  const seconds = Math.max(0, Math.round(value - Date.now() / 1000));
+  if (seconds <= 0) return '即将执行';
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}min`;
+  return `${Math.round(seconds / 3600)}h`;
+}
+function renderSchedulerStatus(scheduler) {
+  const status = scheduler || {};
+  const el = byId('scheduler_status');
+  if (!el) return;
+  if (status.enabled === false) {
+    el.textContent = '自动策略：关闭';
+    return;
+  }
+  const suffix = status.skipped_reason
+    ? ` | ${status.skipped_reason}`
+    : ` | 下次 ${formatSchedulerTime(status.next_run_at)}`;
+  el.textContent = `自动策略：${status.interval_seconds || '--'}s${suffix}`;
+}
 async function loadTasks() {
   const res = await fetch('/api/tasks/list');
   const data = await res.json();
+  renderSchedulerStatus(data.scheduler || {});
   const tasks = data.tasks || [];
   if (!tasks.length) {
     byId('task_log').innerHTML = '<div class="empty">暂无任务</div>';

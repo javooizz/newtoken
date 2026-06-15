@@ -49,7 +49,7 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
         <h1>运行总览</h1>
         <div class="meta mono">{html_escape(str(state.env_path))}</div>
       </div>
-      <div class="row"><button class="ghost" onclick="loadTasks()">刷新任务</button></div>
+      <div class="row"><span class="pill" id="scheduler_status">策略自动运行</span></div>
     </div>
     <div class="stats">
       <div class="stat"><span class="meta">ChatGPT 席位</span><b id="stat_chatgpt">--/2</b><span class="mini">硬限制 2</span></div>
@@ -60,7 +60,7 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
 
     <section class="band" id="acc">
       <div class="section-head">
-        <div><h2>ACC 策略</h2><div class="meta">Codex 不回 ChatGPT，ChatGPT 总数收敛到 2 以内</div></div>
+        <div><h2>ACC 策略</h2><div class="meta">服务端自动执行；Codex 不回 ChatGPT，ChatGPT 总数收敛到 2 以内</div></div>
         <span id="acc_status" class="status"></span>
       </div>
       <div class="split">
@@ -70,7 +70,7 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
           <div class="toolbar">
             <button onclick="applyAcc()">保存 ACC</button>
             <button class="secondary" onclick="loadMembers()">加载成员</button>
-            <button class="warn" data-action="low_quota_policy" onclick="startTask('low_quota_policy')">执行策略</button>
+            <button class="warn" data-action="low_quota_policy" onclick="startTask('low_quota_policy')">立即运行策略</button>
           </div>
         </div>
         <div id="acc_members"><div class="empty">等待加载成员</div></div>
@@ -153,6 +153,9 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
         <div><label>Web 端口</label><input id="cfg_web_port" value="{view['port']}"></div>
         <div><label>Web Host</label><input id="cfg_web_host" value="{view['web_host']}"></div>
         <div><label>Web 密码</label><input id="cfg_web_secret" value="" type="password" placeholder="留空不修改"></div>
+        <div><label>自动策略</label><select id="cfg_auto_policy_enabled"><option value="true" {view['auto_policy_enabled_true']}>开启</option><option value="false" {view['auto_policy_enabled_false']}>关闭</option></select></div>
+        <div><label>策略间隔秒</label><input id="cfg_auto_policy_interval" value="{view['auto_policy_interval']}"></div>
+        <div><label>启动后执行</label><select id="cfg_auto_policy_run_on_start"><option value="true" {view['auto_policy_run_on_start_true']}>开启</option><option value="false" {view['auto_policy_run_on_start_false']}>关闭</option></select></div>
       </div>
       <div class="toolbar">
         <button onclick="saveConfig()">保存配置</button>
@@ -187,6 +190,21 @@ def build_index_view(values: dict[str, str], state: WebState) -> dict[str, str]:
             "已保存，输入新值替换" if values.get("SUB2API_ADMIN_API_KEY") else ""
         ),
         "csrf": html_escape(state.csrf_token),
+        "auto_policy_enabled_true": (
+            "selected" if str(values.get("SUB2API_AUTO_POLICY_ENABLED", "true")).lower() != "false" else ""
+        ),
+        "auto_policy_enabled_false": (
+            "selected" if str(values.get("SUB2API_AUTO_POLICY_ENABLED", "true")).lower() == "false" else ""
+        ),
+        "auto_policy_interval": html_escape(
+            values.get("SUB2API_AUTO_POLICY_INTERVAL_SECONDS", "300")
+        ),
+        "auto_policy_run_on_start_true": (
+            "selected" if str(values.get("SUB2API_AUTO_POLICY_RUN_ON_START", "true")).lower() != "false" else ""
+        ),
+        "auto_policy_run_on_start_false": (
+            "selected" if str(values.get("SUB2API_AUTO_POLICY_RUN_ON_START", "true")).lower() == "false" else ""
+        ),
         "group_ids": html_escape(values.get("SUB2API_GROUP_IDS", "")),
         "import_concurrency": html_escape(values.get("SUB2API_IMPORT_CONCURRENCY", "50")),
         "oauth_concurrency": html_escape(oauth_defaults.get("concurrency", "10")),

@@ -89,6 +89,12 @@ class WebTaskStore:
                 )
             ]
 
+    def shutdown(self, *, wait: bool = False) -> None:
+        try:
+            self._executor.shutdown(wait=wait, cancel_futures=False)
+        except TypeError:
+            self._executor.shutdown(wait=wait)
+
     def _trim_locked(self) -> None:
         while len(self._tasks) > self.max_items:
             completed_keys = [

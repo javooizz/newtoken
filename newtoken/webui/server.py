@@ -22,6 +22,8 @@ from newtoken.webui.config import (
     WebState,
 )
 from newtoken.webui.page import build_index_html
+from newtoken.webui.scheduler import WebScheduler
+from newtoken.webui.utils import html_escape
 from newtoken.webui.utils import json_safe
 
 class WebUIHandler(BaseHTTPRequestHandler):
@@ -53,7 +55,8 @@ class WebUIHandler(BaseHTTPRequestHandler):
             if not self._is_authorized():
                 self._send_json({"ok": False, "error": "unauthorized"}, status=401)
                 return
-            self._send_json({"tasks": self.state.tasks.list_recent()})
+            scheduler = self.state.scheduler.snapshot() if self.state.scheduler else {}
+            self._send_json({"tasks": self.state.tasks.list_recent(), "scheduler": scheduler})
             return
         if path == "/api/conversion/payload":
             if not self._is_authorized():
@@ -201,16 +204,21 @@ def main(argv: list[str] | None = None) -> int:
     state = WebState(env_path)
     values = state.load_config()
     host, port = resolve_server_bind(args, values)
+    scheduler = WebScheduler(state)
+    state.scheduler = scheduler
     server = Sub2APIWebServer((host, port), WebUIHandler, state)
     print(f"Sub2API WebUI listening on http://{host}:{port}")
     if values.get("SUB2API_OUTBOUND_PROXY_URL"):
         print(f"Outbound proxy: {mask_proxy_url(values.get('SUB2API_OUTBOUND_PROXY_URL'))}")
     if not state.auth_secret:
         print("Warning: SUB2API_WEB_SECRET is empty; WebUI has no password.")
+    scheduler.start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("Stopping Sub2API WebUI...")
     finally:
+        scheduler.stop()
         server.server_close()
+        state.tasks.shutdown(wait=False)
     return 0

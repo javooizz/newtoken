@@ -57,7 +57,7 @@ TRANSIENT_NETWORK_EXCEPTIONS = (
 )
 
 
-@dataclass(slots=True)
+@dataclass
 class Config:
     """脚本运行配置。"""
 

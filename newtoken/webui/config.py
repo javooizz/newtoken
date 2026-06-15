@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import secrets
 from pathlib import Path
+from typing import Any
 
 import newtoken.acc.seat_client as seat_core
 from newtoken.sub2api.remote import build_remote_config, load_remote_import_defaults
@@ -23,6 +24,10 @@ SEAT_ACTIONS = {
     "Codex": "usage_based",
 }
 LOW_QUOTA_THRESHOLD_PERCENT = 10.0
+AUTO_POLICY_TASK_LABEL = "low_quota_policy"
+AUTO_POLICY_DEFAULT_INTERVAL_SECONDS = 300
+AUTO_POLICY_MIN_INTERVAL_SECONDS = 60
+AUTO_POLICY_MAX_INTERVAL_SECONDS = 86400
 WEB_ENV_FIELD_ORDER = [
     "SUB2API_BASE_URL",
     "SUB2API_ADMIN_API_KEY",
@@ -45,6 +50,9 @@ WEB_ENV_FIELD_ORDER = [
     "SUB2API_WEB_PORT",
     "SUB2API_WEB_HOST",
     "SUB2API_WEB_SECRET",
+    "SUB2API_AUTO_POLICY_ENABLED",
+    "SUB2API_AUTO_POLICY_INTERVAL_SECONDS",
+    "SUB2API_AUTO_POLICY_RUN_ON_START",
     "ACC_MOTHER_ACCOUNT_EMAIL",
     "CHATGPT_RANDOM_EMAIL_DOMAIN",
     "OPENAI_ACCESS_TOKEN",
@@ -77,6 +85,9 @@ WEB_DEFAULT_ENV_VALUES: dict[str, str] = {
     "SUB2API_WEB_PORT": str(WEB_DEFAULT_PORT),
     "SUB2API_WEB_HOST": WEB_DEFAULT_HOST,
     "SUB2API_WEB_SECRET": "",
+    "SUB2API_AUTO_POLICY_ENABLED": "true",
+    "SUB2API_AUTO_POLICY_INTERVAL_SECONDS": str(AUTO_POLICY_DEFAULT_INTERVAL_SECONDS),
+    "SUB2API_AUTO_POLICY_RUN_ON_START": "true",
     "ACC_MOTHER_ACCOUNT_EMAIL": "",
     "CHATGPT_RANDOM_EMAIL_DOMAIN": "example.com",
     "OPENAI_ACCESS_TOKEN": "",
@@ -144,6 +155,7 @@ class WebState:
     def __init__(self, env_path: Path) -> None:
         self.env_path = env_path
         self.tasks = WebTaskStore()
+        self.scheduler: Any | None = None
         self.csrf_token = secrets.token_urlsafe(24)
         self.sessions: set[str] = set()
         self.auth_secret = ""

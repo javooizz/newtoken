@@ -17,7 +17,12 @@ from newtoken.webui.acc import (
     enforce_acc_low_quota_policy,
     load_acc_members,
 )
-from newtoken.webui.config import WebState
+from newtoken.webui.config import (
+    AUTO_POLICY_DEFAULT_INTERVAL_SECONDS,
+    AUTO_POLICY_MAX_INTERVAL_SECONDS,
+    AUTO_POLICY_MIN_INTERVAL_SECONDS,
+    WebState,
+)
 from newtoken.webui.conversion import import_cached_conversion, run_conversion
 from newtoken.webui.oauth import complete_oauth_session, create_oauth_session
 from newtoken.webui.remote import build_remote_summary, delete_selected_remote_items
@@ -33,6 +38,9 @@ SAVE_CONFIG_KEYS = {
     "SUB2API_VALIDATE_CONCURRENCY",
     "SUB2API_WEB_PORT",
     "SUB2API_WEB_HOST",
+    "SUB2API_AUTO_POLICY_ENABLED",
+    "SUB2API_AUTO_POLICY_INTERVAL_SECONDS",
+    "SUB2API_AUTO_POLICY_RUN_ON_START",
 }
 
 
@@ -71,6 +79,7 @@ def save_config_from_payload(state: WebState, payload: dict[str, Any]) -> dict[s
         parse_socks5_proxy_url(proxy_url)
     validate_web_port(payload)
     normalize_concurrency_fields(payload)
+    normalize_scheduler_fields(payload)
     updates = {
         key: str(payload.get(key) or "")
         for key in SAVE_CONFIG_KEYS
@@ -78,7 +87,10 @@ def save_config_from_payload(state: WebState, payload: dict[str, Any]) -> dict[s
     }
     if "SUB2API_WEB_SECRET" in payload:
         updates["SUB2API_WEB_SECRET"] = str(payload.get("SUB2API_WEB_SECRET") or "")
-    return redact_config(state.save_config(updates))
+    result = redact_config(state.save_config(updates))
+    if state.scheduler:
+        state.scheduler.wake()
+    return result
 
 
 def validate_web_port(payload: dict[str, Any]) -> None:
@@ -111,6 +123,29 @@ def normalize_concurrency_fields(payload: dict[str, Any]) -> None:
             maximum=MAX_CONCURRENT_CHECKS,
         )
         payload[concurrency_key] = str(concurrency_value)
+
+
+def normalize_scheduler_fields(payload: dict[str, Any]) -> None:
+    interval_key = "SUB2API_AUTO_POLICY_INTERVAL_SECONDS"
+    if interval_key in payload:
+        raw_interval = str(payload.get(interval_key) or "").strip()
+        if raw_interval:
+            payload[interval_key] = str(
+                parse_positive_int(
+                    raw_interval,
+                    default=AUTO_POLICY_DEFAULT_INTERVAL_SECONDS,
+                    minimum=AUTO_POLICY_MIN_INTERVAL_SECONDS,
+                    maximum=AUTO_POLICY_MAX_INTERVAL_SECONDS,
+                )
+            )
+    for bool_key in (
+        "SUB2API_AUTO_POLICY_ENABLED",
+        "SUB2API_AUTO_POLICY_RUN_ON_START",
+    ):
+        if bool_key not in payload:
+            continue
+        raw_value = str(payload.get(bool_key) or "").strip().lower()
+        payload[bool_key] = "true" if raw_value in {"1", "true", "yes", "on"} else "false"
 
 
 def start_named_task(state: WebState, payload: dict[str, Any]) -> str:

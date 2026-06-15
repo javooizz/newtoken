@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import concurrent.futures
 import json
 import os
@@ -892,7 +894,7 @@ def scan_remote_accounts(config):
     ) as executor:
         future_map = {
             executor.submit(validate_account_candidate, candidate): entry
-            for candidate, entry in zip(candidates, remote_entries, strict=False)
+            for candidate, entry in zip(candidates, remote_entries)
         }
         for future in concurrent.futures.as_completed(future_map):
             entry = future_map[future]
