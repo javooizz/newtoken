@@ -21,3 +21,10 @@ startup_error.log
 *.pyd
 *.har
 *.png
+oidc/app/config.php
+oidc/storage/keys/*
+oidc/storage/exports/*
+oidc/storage/ratelimits/*
+!oidc/storage/keys/.gitkeep
+!oidc/storage/exports/.gitkeep
+!oidc/storage/ratelimits/.gitkeep
