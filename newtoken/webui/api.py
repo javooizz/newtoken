@@ -24,7 +24,11 @@ from newtoken.webui.config import (
     WebState,
 )
 from newtoken.webui.conversion import import_cached_conversion, run_conversion
-from newtoken.webui.oauth import complete_oauth_session, create_oauth_session
+from newtoken.webui.oauth import (
+    build_oauth_status,
+    complete_oauth_manually,
+    start_oauth_flow,
+)
 from newtoken.webui.remote import build_remote_summary, delete_selected_remote_items
 from newtoken.webui.utils import parse_positive_int, redact_config
 
@@ -38,6 +42,7 @@ SAVE_CONFIG_KEYS = {
     "SUB2API_VALIDATE_CONCURRENCY",
     "SUB2API_WEB_PORT",
     "SUB2API_WEB_HOST",
+    "SUB2API_WEB_PUBLIC_BASE_URL",
     "SUB2API_AUTO_POLICY_ENABLED",
     "SUB2API_AUTO_POLICY_INTERVAL_SECONDS",
     "SUB2API_AUTO_POLICY_RUN_ON_START",
@@ -51,11 +56,13 @@ def dispatch_api(path: str, payload: dict[str, Any], state: WebState) -> Any:
         return test_sub2api_connection(state.build_remote_config())
     if path == "/api/tasks/start":
         return {"task_id": start_named_task(state, payload)}
-    if path == "/api/oauth/create":
+    if path == "/api/oauth/start":
         form = {key: str(value or "") for key, value in payload.items()}
-        return create_oauth_session(state, form)
-    if path == "/api/oauth/complete":
-        return complete_oauth_session(state, str(payload.get("auth_input") or ""))
+        return start_oauth_flow(state, form)
+    if path == "/api/oauth/status":
+        return build_oauth_status(state)
+    if path == "/api/oauth/manual-complete":
+        return complete_oauth_manually(state, str(payload.get("auth_input") or ""))
     if path == "/api/acc/apply":
         return apply_acc_payload(state, str(payload.get("payload") or ""))
     if path == "/api/acc/members":

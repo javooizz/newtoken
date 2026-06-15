@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,7 @@ WEB_ENV_FIELD_ORDER = [
     "SUB2API_OAUTH_ACCOUNT_CONCURRENCY",
     "SUB2API_WEB_PORT",
     "SUB2API_WEB_HOST",
+    "SUB2API_WEB_PUBLIC_BASE_URL",
     "SUB2API_WEB_SECRET",
     "SUB2API_AUTO_POLICY_ENABLED",
     "SUB2API_AUTO_POLICY_INTERVAL_SECONDS",
@@ -84,6 +86,7 @@ WEB_DEFAULT_ENV_VALUES: dict[str, str] = {
     "SUB2API_OAUTH_ACCOUNT_CONCURRENCY": "10",
     "SUB2API_WEB_PORT": str(WEB_DEFAULT_PORT),
     "SUB2API_WEB_HOST": WEB_DEFAULT_HOST,
+    "SUB2API_WEB_PUBLIC_BASE_URL": "",
     "SUB2API_WEB_SECRET": "",
     "SUB2API_AUTO_POLICY_ENABLED": "true",
     "SUB2API_AUTO_POLICY_INTERVAL_SECONDS": str(AUTO_POLICY_DEFAULT_INTERVAL_SECONDS),
@@ -174,6 +177,7 @@ class WebState:
         self.last_oauth_session: dict[str, Any] | None = None
         self.last_acc_members: list[dict[str, Any]] = []
         self.last_usage_lookup: dict[str, Any] = {}
+        self.oauth_lock = threading.Lock()
         self.load_config()
 
     def load_config(self) -> dict[str, str]:

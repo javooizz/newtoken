@@ -117,12 +117,12 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
 
     <section class="band" id="oauth">
       <div class="section-head">
-        <div><h2>OAuth 建号</h2><div class="meta">生成授权链接并导入 Sub2API</div></div>
+        <div><h2>OAuth 一步建号</h2><div class="meta">开始授权后完成登录，系统自动导入 Sub2API</div></div>
         <span id="oauth_status" class="status"></span>
       </div>
       <div class="grid">
         <div><label>账号名</label><input id="oauth_account_name"></div>
-        <div><label>回调地址</label><input id="oauth_redirect_uri" value="{view['oauth_redirect_uri']}"></div>
+        <div><label>公网回调地址</label><input id="oauth_public_base_url" value="{view['public_base_url']}" placeholder="http://服务器IP:28463"></div>
         <div><label>远程代理 ID</label><input id="oauth_proxy_id" value="{view['oauth_proxy_id']}"></div>
         <div><label>备用代理 URL</label><input id="oauth_proxy_url" value="{view['oauth_proxy_url']}"></div>
         <div><label>分组 ID</label><input id="oauth_group_ids" value="{view['oauth_group_ids']}"></div>
@@ -130,12 +130,19 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
         <div><label>账号并发</label><input id="oauth_concurrency" value="{view['oauth_concurrency']}"></div>
       </div>
       <div class="toolbar">
-        <button onclick="createOauth()">生成授权链接</button>
-        <button class="secondary" onclick="completeOauth()">完成建号</button>
+        <button id="oauth_start_btn" onclick="startOauth()">开始授权建号</button>
+        <button class="ghost" id="oauth_reset_btn" onclick="resetOauth()" style="display:none">重置</button>
       </div>
       <div class="grid two" style="margin-top:12px">
         <div><label>授权链接</label><input id="oauth_auth_url" readonly></div>
-        <div><label>回调链接或 Code</label><input id="oauth_auth_input"></div>
+        <div><label>状态</label><div class="pill" id="oauth_state_text" style="white-space:normal;height:36px;align-items:center">等待开始</div></div>
+      </div>
+      <div style="margin-top:12px">
+        <label>手动兜底：回调链接或 Code（回调不可达时使用）</label>
+        <div class="row">
+          <input id="oauth_auth_input" placeholder="粘贴完整回调链接或 code" style="flex:1">
+          <button class="secondary" onclick="manualCompleteOauth()">使用手动 Code 完成</button>
+        </div>
       </div>
     </section>
 
@@ -152,6 +159,7 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
         <div><label>SOCKS5 出站代理</label><input id="cfg_outbound_proxy" value="{view['outbound_proxy']}" placeholder="socks5://127.0.0.1:1080"></div>
         <div><label>Web 端口</label><input id="cfg_web_port" value="{view['port']}"></div>
         <div><label>Web Host</label><input id="cfg_web_host" value="{view['web_host']}"></div>
+        <div><label>公网回调地址</label><input id="cfg_public_base_url" value="{view['public_base_url']}" placeholder="https://你的域名 或 http://IP:端口"></div>
         <div><label>Web 密码</label><input id="cfg_web_secret" value="" type="password" placeholder="留空不修改"></div>
         <div><label>自动策略</label><select id="cfg_auto_policy_enabled"><option value="true" {view['auto_policy_enabled_true']}>开启</option><option value="false" {view['auto_policy_enabled_false']}>关闭</option></select></div>
         <div><label>策略间隔秒</label><input id="cfg_auto_policy_interval" value="{view['auto_policy_interval']}"></div>
@@ -220,6 +228,7 @@ def build_index_view(values: dict[str, str], state: WebState) -> dict[str, str]:
         "port": html_escape(values.get("SUB2API_WEB_PORT") or WEB_DEFAULT_PORT),
         "proxy_id": html_escape(values.get("SUB2API_PROXY_ID", "")),
         "proxy_status": build_proxy_status(values.get("SUB2API_OUTBOUND_PROXY_URL", "")),
+        "public_base_url": html_escape(values.get("SUB2API_WEB_PUBLIC_BASE_URL", "")),
         "remote_base": html_escape(values.get("SUB2API_BASE_URL", "")),
         "validate_concurrency": html_escape(values.get("SUB2API_VALIDATE_CONCURRENCY", "24")),
         "web_host": html_escape(values.get("SUB2API_WEB_HOST") or WEB_DEFAULT_HOST),

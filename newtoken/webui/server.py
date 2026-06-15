@@ -21,6 +21,7 @@ from newtoken.webui.config import (
     WEB_DEFAULT_PORT,
     WebState,
 )
+from newtoken.webui.oauth import complete_oauth_from_callback
 from newtoken.webui.page import build_index_html
 from newtoken.webui.scheduler import WebScheduler
 from newtoken.webui.utils import html_escape
@@ -42,6 +43,9 @@ class WebUIHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path == "/login":
             self._send_html(self._build_login_html())
+            return
+        if path == "/oauth/callback":
+            self._handle_oauth_callback()
             return
         if path == "/api/tasks/get":
             if not self._is_authorized():
@@ -154,6 +158,31 @@ class WebUIHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         self._send_html(self._build_login_html("密码错误"), status=401)
+
+    def _handle_oauth_callback(self) -> None:
+        host = self.headers.get("Host", "127.0.0.1:28463")
+        callback_url = f"http://{host}{self.path}"
+        try:
+            result = complete_oauth_from_callback(self.state, callback_url)
+            status_text = result.get("status", "")
+            if status_text == "done":
+                account_id = result.get("account_id", "")
+                self._send_html(f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>OAuth 建号完成</title>
+<style>body{{font-family:system-ui;margin:0;background:#f7f8fa;color:#172033}}main{{max-width:420px;margin:14vh auto;background:white;border:1px solid #d8dde6;border-radius:8px;padding:22px;text-align:center}}.ok{{color:#087443;font-weight:750}}</style></head>
+<body><main><h3>OAuth 建号完成</h3><p>账号 ID：<span class="ok">{html_escape(str(account_id))}</span></p><p>可以关闭当前页面，回到 WebUI 查看账号。</p></main></body></html>""")
+            elif status_text == "creating_account":
+                self._send_html("""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>OAuth 处理中</title>
+<style>body{{font-family:system-ui;margin:0;background:#f7f8fa;color:#172033}}main{{max-width:420px;margin:14vh auto;background:white;border:1px solid #d8dde6;border-radius:8px;padding:22px;text-align:center}}</style></head>
+<body><main><h3>OAuth 回调已接收</h3><p>正在创建 Sub2API 账号，请稍候...</p></main></body></html>""")
+            else:
+                error = result.get("error", "")
+                self._send_html(f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>OAuth 失败</title>
+<style>body{{font-family:system-ui;margin:0;background:#f7f8fa;color:#172033}}main{{max-width:420px;margin:14vh auto;background:white;border:1px solid #d8dde6;border-radius:8px;padding:22px;text-align:center}}.bad{{color:#b42318}}</style></head>
+<body><main><h3>OAuth 回调失败</h3><p class="bad">{html_escape(error)}</p></main></body></html>""")
+        except Exception as exc:  # noqa: BLE001
+            self._send_html(f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>OAuth 回调错误</title>
+<style>body{{font-family:system-ui;margin:0;background:#f7f8fa;color:#172033}}main{{max-width:420px;margin:14vh auto;background:white;border:1px solid #d8dde6;border-radius:8px;padding:22px;text-align:center}}.bad{{color:#b42318}}</style></head>
+<body><main><h3>OAuth 回调处理失败</h3><p class="bad">{html_escape(str(exc))}</p><p>请回到 WebUI 查看状态或使用手动 Code 兜底。</p></main></body></html>""", status=500)
 
     def _read_form_body(self) -> dict[str, str]:
         length = int(self.headers.get("Content-Length") or 0)
