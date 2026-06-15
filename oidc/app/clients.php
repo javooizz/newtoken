@@ -51,3 +51,12 @@ function app_secret_decrypt(string $enc, string $key): string
     }
     return $plain;
 }
+
+function app_client_redirect_allowed(array $client, string $redirectUri): bool
+{
+    $list = json_decode($client['redirect_uris'] ?? '[]', true);
+    if (!is_array($list)) {
+        return false;
+    }
+    return in_array($redirectUri, $list, true);
+}
