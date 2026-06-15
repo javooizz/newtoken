@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from sub2api_converter_remote import (
+from newtoken.sub2api.remote import (
     delete_dead_remote_accounts,
     scan_remote_accounts,
     select_remote_accounts_with_auth_error,
     select_remote_accounts_without_quota,
 )
-from sub2api_webui_config import WebState
+from newtoken.webui.config import WebState
 
 
 def build_remote_summary(state: WebState) -> dict[str, Any]:

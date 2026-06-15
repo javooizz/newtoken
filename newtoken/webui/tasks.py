@@ -61,12 +61,14 @@ class WebTaskStore:
                     task["error"] = str(exc)
                     task["finished_at"] = time.time()
                     self._active_by_label.pop(normalized_label, None)
+                    self._trim_locked()
                 return
             with self._lock:
                 task["status"] = "done"
                 task["result"] = result
                 task["finished_at"] = time.time()
                 self._active_by_label.pop(normalized_label, None)
+                self._trim_locked()
 
         self._executor.submit(runner)
         return task_id

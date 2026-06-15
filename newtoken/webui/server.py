@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from sub2api_http_client import mask_proxy_url
-from sub2api_webui_api import dispatch_api
-from sub2api_webui_config import (
+from newtoken.common.http_client import mask_proxy_url
+from newtoken.webui.api import dispatch_api
+from newtoken.webui.config import (
     ENV_PATH,
     MAX_REQUEST_BODY_BYTES,
     SESSION_COOKIE_NAME,
@@ -21,8 +21,8 @@ from sub2api_webui_config import (
     WEB_DEFAULT_PORT,
     WebState,
 )
-from sub2api_webui_page import build_index_html
-from sub2api_webui_utils import json_safe
+from newtoken.webui.page import build_index_html
+from newtoken.webui.utils import json_safe
 
 class WebUIHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the WebUI."""

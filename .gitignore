@@ -5,10 +5,17 @@
 .acc_member_list_cache.json
 .acc_ui_settings_cache.json
 .sub2api_usage_cache.json
+.webui-runtime/
 __pycache__/
 .ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.vscode/
+.writerHelper/
 build/
 dist/
+startup_error.log
+*.log
 *.pyc
 *.pyo
 *.pyd

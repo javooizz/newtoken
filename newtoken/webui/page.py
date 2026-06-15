@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from sub2api_converter_core import CAP_OUTPUT_MODE, DEFAULT_OUTPUT_MODE
-from sub2api_converter_remote_openai_oauth import load_openai_oauth_defaults
-from sub2api_http_client import mask_proxy_url, parse_socks5_proxy_url
-from sub2api_webui_assets import WEBUI_CSS, WEBUI_JS
-from sub2api_webui_config import (
+from newtoken.sub2api.converter_core import CAP_OUTPUT_MODE, DEFAULT_OUTPUT_MODE
+from newtoken.sub2api.remote_oauth import load_openai_oauth_defaults
+from newtoken.common.http_client import mask_proxy_url, parse_socks5_proxy_url
+from newtoken.webui.assets import WEBUI_CSS, WEBUI_JS
+from newtoken.webui.config import (
     LOW_QUOTA_THRESHOLD_PERCENT,
     WEB_DEFAULT_HOST,
     WEB_DEFAULT_PORT,
     WebState,
 )
-from sub2api_webui_tasks import MAX_WEB_TASK_WORKERS
-from sub2api_webui_utils import html_escape, redact_config
+from newtoken.webui.tasks import MAX_WEB_TASK_WORKERS
+from newtoken.webui.utils import html_escape, redact_config
 
 
 def build_index_html(values: dict[str, str], state: WebState) -> str:

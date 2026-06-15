@@ -6,8 +6,8 @@ import html
 from dataclasses import asdict
 from typing import Any
 
-from sub2api_converter_remote import mask_secret_value
-from sub2api_http_client import mask_proxy_url
+from newtoken.sub2api.remote import mask_secret_value
+from newtoken.common.http_client import mask_proxy_url
 
 def redact_config(values: dict[str, str]) -> dict[str, str]:
     """Return config values safe enough for display."""

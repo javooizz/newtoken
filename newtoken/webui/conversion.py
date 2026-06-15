@@ -6,7 +6,7 @@ import concurrent.futures
 import json
 from typing import Any
 
-from sub2api_converter_core import (
+from newtoken.sub2api.converter_core import (
     CAP_OUTPUT_MODE,
     MAX_CONCURRENT_CHECKS,
     build_cap_result,
@@ -16,9 +16,9 @@ from sub2api_converter_core import (
     resolve_input_sources,
     validate_account_candidate,
 )
-from sub2api_converter_remote import import_to_sub2api_codex_session
-from sub2api_webui_config import WebState
-from sub2api_webui_utils import parse_positive_int
+from newtoken.sub2api.remote import import_to_sub2api_codex_session
+from newtoken.webui.config import WebState
+from newtoken.webui.utils import parse_positive_int
 
 
 def run_conversion(input_path: str, output_mode: str, state: WebState) -> dict[str, Any]:

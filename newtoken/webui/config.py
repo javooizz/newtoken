@@ -6,11 +6,11 @@ import json
 import secrets
 from pathlib import Path
 
-import standalone_acc_change_seat_cli as seat_core
-from sub2api_converter_remote import build_remote_config, load_remote_import_defaults
-from sub2api_http_client import apply_proxy_env
-from sub2api_runtime import get_app_dir
-from sub2api_webui_tasks import WebTaskStore
+import newtoken.acc.seat_client as seat_core
+from newtoken.sub2api.remote import build_remote_config, load_remote_import_defaults
+from newtoken.common.http_client import apply_proxy_env
+from newtoken.common.runtime import get_app_dir
+from newtoken.webui.tasks import WebTaskStore
 
 APP_DIR = get_app_dir(__file__)
 ENV_PATH = APP_DIR / ".env"

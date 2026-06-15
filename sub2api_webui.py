@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sub2api_webui_server import main
+from newtoken.webui.server import main
 
 
 if __name__ == "__main__":

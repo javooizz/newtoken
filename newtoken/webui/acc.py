@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import standalone_acc_change_seat_cli as seat_core
-from standalone_sub2api_usage_bridge import (
+import newtoken.acc.seat_client as seat_core
+from newtoken.sub2api.usage_bridge import (
     Sub2APIUsageSnapshot,
     load_sub2api_usage_lookup,
     normalize_email,
     set_remote_accounts_inactive,
 )
-from sub2api_webui_config import LOW_QUOTA_THRESHOLD_PERCENT, SeatApiWebError, WebState
+from newtoken.webui.config import LOW_QUOTA_THRESHOLD_PERCENT, SeatApiWebError, WebState
 
 
 def build_acc_env_values(

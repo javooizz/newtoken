@@ -1,13 +1,13 @@
 """Compatibility exports for WebUI business actions.
 
 New code should import from the domain modules directly:
-`sub2api_webui_acc`, `sub2api_webui_conversion`,
-`sub2api_webui_oauth`, and `sub2api_webui_remote`.
+`newtoken.webui.acc`, `newtoken.webui.conversion`,
+`newtoken.webui.oauth`, and `newtoken.webui.remote`.
 """
 
 from __future__ import annotations
 
-from sub2api_webui_acc import (
+from newtoken.webui.acc import (
     apply_acc_payload,
     build_acc_env_values,
     change_acc_user_seat,
@@ -17,9 +17,9 @@ from sub2api_webui_acc import (
     parse_acc_import_payload,
     refresh_acc_usage,
 )
-from sub2api_webui_conversion import import_cached_conversion, run_conversion
-from sub2api_webui_oauth import complete_oauth_session, create_oauth_session
-from sub2api_webui_remote import build_remote_summary, delete_selected_remote_items
+from newtoken.webui.conversion import import_cached_conversion, run_conversion
+from newtoken.webui.oauth import complete_oauth_session, create_oauth_session
+from newtoken.webui.remote import build_remote_summary, delete_selected_remote_items
 
 __all__ = [
     "apply_acc_payload",

@@ -4,24 +4,24 @@ from __future__ import annotations
 
 from typing import Any
 
-import standalone_acc_change_seat_cli as seat_core
-from sub2api_converter_core import DEFAULT_OUTPUT_MODE, MAX_CONCURRENT_CHECKS
-from sub2api_converter_remote import (
+import newtoken.acc.seat_client as seat_core
+from newtoken.sub2api.converter_core import DEFAULT_OUTPUT_MODE, MAX_CONCURRENT_CHECKS
+from newtoken.sub2api.remote import (
     set_all_remote_openai_account_privacy,
     test_sub2api_connection,
 )
-from sub2api_http_client import parse_socks5_proxy_url
-from sub2api_webui_acc import (
+from newtoken.common.http_client import parse_socks5_proxy_url
+from newtoken.webui.acc import (
     apply_acc_payload,
     change_acc_user_seat,
     enforce_acc_low_quota_policy,
     load_acc_members,
 )
-from sub2api_webui_config import WebState
-from sub2api_webui_conversion import import_cached_conversion, run_conversion
-from sub2api_webui_oauth import complete_oauth_session, create_oauth_session
-from sub2api_webui_remote import build_remote_summary, delete_selected_remote_items
-from sub2api_webui_utils import parse_positive_int, redact_config
+from newtoken.webui.config import WebState
+from newtoken.webui.conversion import import_cached_conversion, run_conversion
+from newtoken.webui.oauth import complete_oauth_session, create_oauth_session
+from newtoken.webui.remote import build_remote_summary, delete_selected_remote_items
+from newtoken.webui.utils import parse_positive_int, redact_config
 
 SAVE_CONFIG_KEYS = {
     "SUB2API_BASE_URL",

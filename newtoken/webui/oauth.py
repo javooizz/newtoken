@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from sub2api_converter_remote_openai_oauth import (
+from newtoken.sub2api.remote_oauth import (
     complete_openai_oauth_account_creation,
     create_openai_oauth_pending_session,
     load_openai_oauth_defaults,
     normalize_oauth_concurrency,
 )
-from sub2api_webui_config import WebState
+from newtoken.webui.config import WebState
 
 
 def create_oauth_session(state: WebState, form: dict[str, str]) -> dict[str, Any]:
