@@ -46,7 +46,7 @@ entry.py  newtoken/  scripts/  tools/
 
 ## 相关项目
 
-**GPT OIDC** — ChatGPT Business SSO 身份提供者，PHP 应用，独立部署，与 WebUI 共用 OAuth 域名。
+**GPT OIDC** — ChatGPT Business SSO 身份提供者（PHP），**独立域名部署**。详见 OIDC 项目的 `DEPLOY_OIDC.md`。
 
 ## 依赖
 
