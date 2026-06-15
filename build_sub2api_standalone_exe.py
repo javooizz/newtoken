@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,19 @@ def resolve_python_executable(explicit_python: str = "") -> str:
     if explicit_python.strip():
         return explicit_python.strip()
     return sys.executable
+
+
+def emit_console_line(text: str) -> None:
+    """以当前控制台可接受的形式输出文本，避免编码报错中断构建。"""
+
+    stream = sys.stdout
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    if not isinstance(stream, io.TextIOBase):
+        stream.write(f"{text}\n")
+        return
+    safe_text = text.encode(encoding, errors="backslashreplace").decode(encoding)
+    stream.write(f"{safe_text}\n")
+    stream.flush()
 
 
 def build_pyinstaller_command(
@@ -108,14 +122,14 @@ def run_build(*, python_executable: str, onefile: bool, dry_run: bool) -> int:
         onefile=onefile,
     )
     if dry_run:
-        print(" ".join(command))
+        emit_console_line(" ".join(command))
         return 0
 
     subprocess.run(command, check=True, cwd=PROJECT_DIR)
     copied_files = copy_release_support_files(onefile=onefile)
-    print(f"[BUILD] 输出目录：{resolve_release_dir(onefile=onefile)}")
+    emit_console_line(f"[BUILD] 输出目录：{resolve_release_dir(onefile=onefile)}")
     for copied_file in copied_files:
-        print(f"[BUILD] 已写入：{copied_file}")
+        emit_console_line(f"[BUILD] 已写入：{copied_file}")
     return 0
 
 
