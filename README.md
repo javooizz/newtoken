@@ -107,15 +107,3 @@ Windows 打包桌面版：
 py .\tools\build_sub2api_standalone_exe.py --onefile
 ```
 
-## 忽略文件
-
-以下文件是本地私密配置或运行缓存，不要上传：
-
-- `.env`
-- `.webui-runtime/`
-- `.session_cache.json`
-- `.acc_input_cache.txt`
-- `.acc_member_list_cache.json`
-- `.sub2api_usage_cache.json`
-- `*.har`
-- `startup_error.log`
