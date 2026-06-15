@@ -233,19 +233,28 @@ def apply_env_values_to_process(values: dict[str, str]) -> None:
 class FirstRunSetupDialog:
     """首次启动配置向导。"""
 
-    def __init__(self, root: tk.Tk, env_path: Path, initial_values: dict[str, str]) -> None:
+    def __init__(
+        self,
+        root: tk.Tk,
+        env_path: Path,
+        initial_values: dict[str, str],
+        *,
+        use_root_window: bool = False,
+    ) -> None:
         self.root = root
         self.env_path = env_path
+        self.use_root_window = use_root_window
         self.result: dict[str, str] | None = None
         merged_values = dict(DEFAULT_ENV_VALUES)
         merged_values.update(initial_values or {})
 
-        self.window = tk.Toplevel(root)
+        self.window = root if use_root_window else tk.Toplevel(root)
         self.window.title("首次启动配置")
         self.window.geometry("760x520")
         self.window.minsize(680, 460)
-        self.window.transient(root)
-        self.window.grab_set()
+        if not use_root_window:
+            self.window.transient(root)
+            self.window.grab_set()
         self.window.protocol("WM_DELETE_WINDOW", self.handle_skip)
         center_window(self.window, preferred_width=760, preferred_height=520)
         bring_window_to_front(self.window)
@@ -404,8 +413,7 @@ def prepare_first_run_environment(module_file: str | Path) -> dict[str, str]:
         return values
 
     root = tk.Tk()
-    root.withdraw()
-    dialog = FirstRunSetupDialog(root, env_path, values)
+    dialog = FirstRunSetupDialog(root, env_path, values, use_root_window=True)
     result = dialog.show()
     root.destroy()
     return result

@@ -24,6 +24,9 @@ from sub2api_converter import ConverterApp  # noqa: E402
 from sub2api_converter_openai_oauth_ui import OpenAIOAuthAccountPageWindow  # noqa: E402
 from standalone_acc_seat_converter_ui import StandaloneAccSeatConverterApp  # noqa: E402
 
+APP_MUTEX_NAME = "Global\\Sub2APIStandaloneToolSingleton"
+_APP_MUTEX_HANDLE = None
+
 
 class Sub2APIStandaloneApp(ConverterApp):
     """独立的 Sub2API 工具，只保留远程管理和授权建号。"""
@@ -105,10 +108,41 @@ def show_startup_error_message(log_path: Path) -> None:
         return
 
 
+def acquire_single_instance_mutex() -> bool:
+    """限制同一台机器同时只开一个独立工具实例。"""
+
+    global _APP_MUTEX_HANDLE
+    create_mutex = ctypes.windll.kernel32.CreateMutexW
+    get_last_error = ctypes.windll.kernel32.GetLastError
+    create_mutex.restype = ctypes.c_void_p
+    handle = create_mutex(None, False, APP_MUTEX_NAME)
+    if not handle:
+        return True
+    _APP_MUTEX_HANDLE = handle
+    return int(get_last_error()) != 183
+
+
+def show_already_running_message() -> None:
+    """提示用户程序已经在运行。"""
+
+    try:
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "Sub2API 已经在运行了。\n请先查看任务栏、Alt+Tab，或结束旧进程后再重开。",
+            "Sub2API 已在运行",
+            0x30,
+        )
+    except Exception:
+        return
+
+
 def main() -> int:
     """独立工具入口。"""
 
     try:
+        if not acquire_single_instance_mutex():
+            show_already_running_message()
+            return 0
         if os.environ.get("SUB2API_SKIP_FIRST_RUN_SETUP", "").strip() != "1":
             prepare_first_run_environment(__file__)
         Sub2APIStandaloneApp().run()
