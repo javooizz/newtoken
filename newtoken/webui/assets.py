@@ -4,19 +4,19 @@ from __future__ import annotations
 
 WEBUI_CSS = """
 :root {
-  --bg: #eef2f6;
+  --bg: #edf2f7;
   --surface: #ffffff;
   --surface-2: #f8fafc;
   --line: #d7dee8;
-  --text: #17202f;
+  --text: #172033;
   --muted: #647083;
-  --brand: #0f766e;
-  --brand-2: #115e59;
+  --brand: #145c62;
+  --brand-2: #0f4f54;
   --blue: #22577a;
   --warn: #9a3412;
   --danger: #b42318;
   --ok: #087443;
-  --shadow: 0 16px 34px rgba(22, 31, 45, .08);
+  --shadow: 0 14px 30px rgba(22, 31, 45, .08);
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -30,8 +30,8 @@ button.danger { background: var(--danger); }
 button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
 button:disabled { opacity: .58; cursor: wait; }
 input, textarea, select { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--text); padding: 9px 10px; outline: none; }
-input:focus, textarea:focus, select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(15, 118, 110, .12); }
-textarea { min-height: 132px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.45; }
+input:focus, textarea:focus, select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(20, 92, 98, .12); }
+textarea { min-height: 126px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.45; }
 label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 5px; }
 .app { min-height: 100vh; display: grid; grid-template-columns: 236px minmax(0, 1fr); }
 aside { position: sticky; top: 0; height: 100vh; padding: 18px; background: #162334; color: white; }
@@ -41,9 +41,9 @@ nav { display: grid; gap: 6px; margin-top: 22px; }
 nav a { color: #e5edf6; text-decoration: none; padding: 9px 10px; border-radius: 6px; font-size: 14px; }
 nav a:hover { background: rgba(255, 255, 255, .1); }
 main { min-width: 0; padding: 22px; }
-.topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
-h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: 0; }
-h2 { font-size: 17px; margin: 0; letter-spacing: 0; }
+.topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 14px 0 16px; }
+h1 { font-size: 24px; margin: 0 0 4px; }
+h2 { font-size: 17px; margin: 0; }
 h3 { font-size: 14px; margin: 0 0 10px; }
 .meta { color: var(--muted); font-size: 13px; }
 .status { color: var(--muted); font-size: 13px; min-height: 20px; }
@@ -54,11 +54,14 @@ h3 { font-size: 14px; margin: 0 0 10px; }
 .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
-.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-height: 82px; }
+.stat, .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-height: 82px; }
 .stat b { display: block; font-size: 24px; line-height: 1.1; margin-top: 7px; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
 .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, .65fr); gap: 14px; }
+.config-stack { display: grid; gap: 14px; }
+.config-group { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--surface-2); }
+.field-wide { margin-top: 12px; }
 .table-wrap { overflow: auto; max-height: 460px; border: 1px solid var(--line); border-radius: 8px; background: white; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { border-bottom: 1px solid var(--line); padding: 8px 9px; text-align: left; vertical-align: top; }
@@ -67,26 +70,25 @@ tr:last-child td { border-bottom: 0; }
 .pill { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; background: var(--surface-2); color: var(--muted); font-size: 12px; }
 .pill.ok { background: #ecfdf5; border-color: var(--ok); color: var(--ok); }
 .pill.bad { background: #fef3f2; border-color: var(--danger); color: var(--danger); }
-.oauth-state { white-space: normal; min-height: 36px; display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); }
-.oauth-state.ok { background: #ecfdf5; border-color: var(--ok); color: var(--ok); }
-.oauth-state.bad { background: #fef3f2; border-color: var(--danger); color: var(--danger); }
 .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
 .mini { font-size: 12px; color: var(--muted); }
-.compact { max-width: 160px; }
 .task-list { display: grid; gap: 8px; }
 .task { border: 1px solid var(--line); border-radius: 8px; background: white; padding: 10px; display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .task strong { font-size: 13px; }
 .task small { color: var(--muted); }
 .empty { color: var(--muted); padding: 14px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); }
-.fold { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.banner { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 14px; background: white; box-shadow: var(--shadow); }
+.banner.ok { border-color: rgba(8,116,67,.25); }
+.banner.bad { border-color: rgba(180,35,24,.28); }
+.shell.hidden { opacity: .45; pointer-events: none; filter: grayscale(.08); }
 @media (max-width: 1280px) {
-  .grid, .fold { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid, .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 1080px) {
   .app { grid-template-columns: 1fr; }
   aside { position: static; height: auto; }
   nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .grid, .grid.two, .stats, .split, .fold { grid-template-columns: 1fr; }
+  .grid, .grid.two, .stats, .split { grid-template-columns: 1fr; }
   main { padding: 14px; }
 }
 """
@@ -101,6 +103,7 @@ const actionStatus = {
   delete_auth_error: 'remote_status',
   delete_dead: 'remote_status',
   low_quota_policy: 'acc_status',
+  auto_maintenance: 'maintenance_status',
   convert: 'convert_status',
   import_cached: 'convert_status',
   import_text: 'convert_status'
@@ -112,6 +115,7 @@ const actionNames = {
   delete_auth_error: '删除 401',
   delete_dead: '删除死号',
   low_quota_policy: '席位策略',
+  auto_maintenance: '自动维护',
   convert: '转换校验',
   import_cached: '缓存导入',
   import_text: '粘贴导入'
@@ -143,37 +147,64 @@ async function api(path, body={}) {
   if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
   return data;
 }
+function buildConfigPayload() {
+  const config = {
+    SUB2API_BASE_URL: formValue('cfg_base_url'),
+    SUB2API_GROUP_IDS: formValue('cfg_group_ids'),
+    SUB2API_PROXY_ID: formValue('cfg_proxy_id'),
+    SUB2API_OUTBOUND_PROXY_URL: formValue('cfg_outbound_proxy'),
+    SUB2API_IMPORT_CONCURRENCY: formValue('cfg_import_concurrency'),
+    SUB2API_VALIDATE_CONCURRENCY: formValue('cfg_validate_concurrency'),
+    SUB2API_WEB_PORT: formValue('cfg_web_port'),
+    SUB2API_WEB_HOST: formValue('cfg_web_host'),
+    SUB2API_WEB_PUBLIC_BASE_URL: formValue('cfg_public_base_url'),
+    SUB2API_AUTO_POLICY_ENABLED: formValue('cfg_auto_policy_enabled'),
+    SUB2API_AUTO_POLICY_INTERVAL_SECONDS: formValue('cfg_auto_policy_interval'),
+    SUB2API_AUTO_POLICY_RUN_ON_START: formValue('cfg_auto_policy_run_on_start'),
+    ACC_MOTHER_ACCOUNT_EMAIL: formValue('cfg_mother_email'),
+    SUB2API_OIDC_API_URL: formValue('cfg_oidc_api_url'),
+    SUB2API_AUTO_REGISTER_ENABLED: formValue('cfg_auto_register_enabled'),
+    SUB2API_AUTO_REGISTER_COUNT: formValue('cfg_auto_register_count'),
+    SUB2API_AUTO_REGISTER_THRESHOLD: formValue('cfg_auto_register_threshold'),
+    SUB2API_AUTO_REGISTER_DOMAIN: formValue('cfg_auto_register_domain')
+  };
+  const adminApiKey = formValue('cfg_api_key');
+  if (adminApiKey) config.SUB2API_ADMIN_API_KEY = adminApiKey;
+  const webSecret = formValue('cfg_web_secret');
+  if (webSecret) config.SUB2API_WEB_SECRET = webSecret;
+  const accPayload = formValue('cfg_acc_payload');
+  if (accPayload) config.ACC_PAYLOAD = accPayload;
+  const oidcApiKey = formValue('cfg_oidc_api_key');
+  if (oidcApiKey) config.SUB2API_OIDC_API_KEY = oidcApiKey;
+  config.SUB2API_SETUP_DONE = 'true';
+  return config;
+}
 async function saveConfig() {
   try {
-    const config = {
-      SUB2API_BASE_URL: formValue('cfg_base_url'),
-      SUB2API_GROUP_IDS: formValue('cfg_group_ids'),
-      SUB2API_PROXY_ID: formValue('cfg_proxy_id'),
-      SUB2API_OUTBOUND_PROXY_URL: formValue('cfg_outbound_proxy'),
-      SUB2API_IMPORT_CONCURRENCY: formValue('cfg_import_concurrency'),
-      SUB2API_VALIDATE_CONCURRENCY: formValue('cfg_validate_concurrency'),
-      SUB2API_WEB_PORT: formValue('cfg_web_port'),
-      SUB2API_WEB_HOST: formValue('cfg_web_host'),
-      SUB2API_WEB_PUBLIC_BASE_URL: formValue('cfg_public_base_url'),
-      SUB2API_AUTO_POLICY_ENABLED: formValue('cfg_auto_policy_enabled'),
-      SUB2API_AUTO_POLICY_INTERVAL_SECONDS: formValue('cfg_auto_policy_interval'),
-      SUB2API_AUTO_POLICY_RUN_ON_START: formValue('cfg_auto_policy_run_on_start')
-    };
-    const adminApiKey = formValue('cfg_api_key');
-    if (adminApiKey) config.SUB2API_ADMIN_API_KEY = adminApiKey;
-    const webSecret = formValue('cfg_web_secret');
-    if (webSecret) config.SUB2API_WEB_SECRET = webSecret;
-    await api('/api/config/save', config);
+    await api('/api/config/save', buildConfigPayload());
+    setText('setup_status', '安装配置已保存');
     setText('config_status', '配置已保存');
-    setStat('stat_proxy', formValue('cfg_outbound_proxy') ? '已配置' : '未配置');
-  } catch(e) { setText('config_status', e.message, true); }
+    if (byId('shell')) byId('shell').className = 'shell visible';
+    window.location.reload();
+  } catch(e) {
+    setText('setup_status', e.message, true);
+    setText('config_status', e.message, true);
+  }
 }
 async function testRemote() {
   try {
     const data = await api('/api/remote/test', {});
-    setText('config_status', 'Sub2API 连接成功');
+    setText('setup_status', 'Sub2API 连接成功');
     setStat('stat_remote', data.result.account_total ?? 'OK');
-  } catch(e) { setText('config_status', e.message, true); }
+  } catch(e) { setText('setup_status', e.message, true); }
+}
+async function testOidc() {
+  try {
+    const data = await api('/api/oidc/test', {});
+    const result = data.result || {};
+    const failed = result.ok === false;
+    setText('setup_status', failed ? (result.error || 'OIDC 未就绪') : 'OIDC 连接成功', failed);
+  } catch(e) { setText('setup_status', e.message, true); }
 }
 async function startTask(action) {
   const body = {
@@ -221,7 +252,6 @@ function renderTaskResult(task) {
   if (task.label === 'remote_scan') renderRemoteSummary(result);
   if (task.label === 'convert') {
     setText('convert_status', `转换完成：可用 ${result.usable_count}/${result.total_candidates}，并发 ${result.validate_concurrency}`);
-    setStat('stat_convert', result.usable_count ?? 0);
   }
   if (task.label.startsWith('delete')) {
     setText('remote_status', `${actionNames[task.label]} 完成`);
@@ -237,6 +267,12 @@ function renderTaskResult(task) {
     setStat('stat_chatgpt', `${result.chatgpt_count}/${result.chatgpt_limit}`);
     setStat('stat_low', result.low_quota_count ?? 0);
   }
+  if (task.label === 'auto_maintenance') {
+    const phases = Array.isArray(result.phases) ? result.phases : [];
+    const summary = phases.map(p => `${p.phase || '--'}:${p.skipped ? 'skip' : p.error ? 'err' : 'ok'}`).join(' | ');
+    byId('maintenance_summary').textContent = summary || '自动维护完成';
+    setText('maintenance_status', result.errors && result.errors.length ? '自动维护有错误' : '自动维护完成', Array.isArray(result.errors) && result.errors.length > 0);
+  }
 }
 function renderRemoteSummary(r) {
   setText('remote_status', `远程 ${r.total_count} | 活 ${r.alive_count} | 死 ${r.dead_count} | 无额度 ${r.no_quota_count} | 均额 ${r.average_remaining_quota}%`);
@@ -250,96 +286,6 @@ function renderRemoteSummary(r) {
     : '<div class="empty">没有需要展示的异常账号</div>';
 }
 function esc(v) { return String(v ?? '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
-let oauthPollTimer = null;
-async function startOauth() {
-  const startBtn = byId('oauth_start_btn');
-  try {
-    startBtn.disabled = true;
-    startBtn.textContent = '正在启动...';
-    const data = await api('/api/oauth/start', {
-      account_name: formValue('oauth_account_name'),
-      public_base_url: formValue('oauth_public_base_url'),
-      proxy_id: formValue('oauth_proxy_id'),
-      proxy_url: formValue('oauth_proxy_url'),
-      group_ids: formValue('oauth_group_ids'),
-      group_name: formValue('oauth_group_name'),
-      concurrency: formValue('oauth_concurrency')
-    });
-    const result = data.result || {};
-    if (result.auth_url) {
-      byId('oauth_auth_url').value = result.auth_url;
-      window.open(result.auth_url, '_blank');
-    }
-    updateOauthUI(result);
-    startOauthPolling();
-  } catch(e) {
-    startBtn.disabled = false;
-    startBtn.textContent = '开始授权建号';
-    setText('oauth_status', e.message, true);
-  }
-}
-function startOauthPolling() {
-  if (oauthPollTimer) return;
-  oauthPollTimer = setInterval(pollOauthStatus, 2000);
-}
-function stopOauthPolling() {
-  if (oauthPollTimer) { clearInterval(oauthPollTimer); oauthPollTimer = null; }
-}
-async function pollOauthStatus() {
-  try {
-    const data = await api('/api/oauth/status', {});
-    const result = data.result || {};
-    updateOauthUI(result);
-    if (['done', 'error', 'idle'].includes(result.status)) stopOauthPolling();
-  } catch(e) {}
-}
-function updateOauthUI(result) {
-  const status = result.status || 'idle';
-  const stateEl = byId('oauth_state_text');
-  const startBtn = byId('oauth_start_btn');
-  const resetBtn = byId('oauth_reset_btn');
-  switch (status) {
-    case 'idle':
-      stateEl.textContent = '等待开始'; stateEl.className = 'oauth-state';
-      startBtn.disabled = false; startBtn.textContent = '开始授权建号'; resetBtn.style.display = 'none';
-      break;
-    case 'waiting_callback':
-      stateEl.textContent = '已生成授权链接，请在新窗口完成登录授权';
-      stateEl.className = 'oauth-state'; startBtn.disabled = true; startBtn.textContent = '等待授权中...'; resetBtn.style.display = '';
-      break;
-    case 'creating_account':
-      stateEl.textContent = '已收到回调，正在创建 Sub2API 账号';
-      stateEl.className = 'oauth-state'; startBtn.disabled = true; startBtn.textContent = '创建账号中...'; resetBtn.style.display = '';
-      break;
-    case 'done':
-      stateEl.textContent = '建号完成 #' + (result.account_id || '--');
-      stateEl.className = 'oauth-state ok'; startBtn.disabled = false; startBtn.textContent = '开始授权建号'; resetBtn.style.display = '';
-      setText('oauth_status', '建号完成 #' + (result.account_id || '--'));
-      break;
-    case 'error':
-      stateEl.textContent = '错误：' + (result.error || '未知');
-      stateEl.className = 'oauth-state bad'; startBtn.disabled = false; startBtn.textContent = '开始授权建号'; resetBtn.style.display = '';
-      setText('oauth_status', result.error || '未知错误', true);
-      break;
-  }
-}
-async function resetOauth() {
-  stopOauthPolling();
-  byId('oauth_auth_url').value = '';
-  byId('oauth_state_text').textContent = '等待开始';
-  byId('oauth_state_text').className = 'oauth-state';
-  byId('oauth_start_btn').disabled = false;
-  byId('oauth_start_btn').textContent = '开始授权建号';
-  byId('oauth_reset_btn').style.display = 'none';
-  setText('oauth_status', '');
-}
-async function manualCompleteOauth() {
-  try {
-    const data = await api('/api/oauth/manual-complete', {auth_input: formValue('oauth_auth_input')});
-    updateOauthUI(data.result || {});
-    startOauthPolling();
-  } catch(e) { setText('oauth_status', e.message, true); }
-}
 async function copyCachedPayload() {
   const res = await fetch('/api/conversion/payload');
   const data = await res.json();
@@ -408,13 +354,13 @@ function renderSchedulerStatus(scheduler) {
   const el = byId('scheduler_status');
   if (!el) return;
   if (status.enabled === false) {
-    el.textContent = '自动策略：关闭';
+    el.textContent = '自动维护：关闭';
     return;
   }
   const suffix = status.skipped_reason
     ? ` | ${status.skipped_reason}`
     : ` | 下次 ${formatSchedulerTime(status.next_run_at)}`;
-  el.textContent = `自动策略：${status.interval_seconds || '--'}s${suffix}`;
+  el.textContent = `自动维护：${status.interval_seconds || '--'}s${suffix}`;
 }
 async function loadTasks() {
   const res = await fetch('/api/tasks/list');

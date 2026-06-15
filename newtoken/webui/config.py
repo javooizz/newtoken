@@ -26,10 +26,13 @@ SEAT_ACTIONS = {
 }
 LOW_QUOTA_THRESHOLD_PERCENT = 10.0
 AUTO_POLICY_TASK_LABEL = "low_quota_policy"
+AUTO_MAINTENANCE_TASK_LABEL = "auto_maintenance"
 AUTO_POLICY_DEFAULT_INTERVAL_SECONDS = 300
 AUTO_POLICY_MIN_INTERVAL_SECONDS = 60
 AUTO_POLICY_MAX_INTERVAL_SECONDS = 86400
+SETUP_DONE_KEY = "SUB2API_SETUP_DONE"
 WEB_ENV_FIELD_ORDER = [
+    "SUB2API_SETUP_DONE",
     "SUB2API_BASE_URL",
     "SUB2API_ADMIN_API_KEY",
     "SUB2API_GROUP_IDS",
@@ -41,13 +44,6 @@ WEB_ENV_FIELD_ORDER = [
     "SUB2API_UPDATE_EXISTING",
     "SUB2API_SKIP_DEFAULT_GROUP_BIND",
     "SUB2API_CONFIRM_MIXED_CHANNEL_RISK",
-    "SUB2API_OAUTH_REDIRECT_URI",
-    "SUB2API_OAUTH_PROXY_ID",
-    "SUB2API_OAUTH_PROXY_URL",
-    "SUB2API_OAUTH_PROXY_NAME",
-    "SUB2API_OAUTH_GROUP_IDS",
-    "SUB2API_OAUTH_GROUP_NAME",
-    "SUB2API_OAUTH_ACCOUNT_CONCURRENCY",
     "SUB2API_WEB_PORT",
     "SUB2API_WEB_HOST",
     "SUB2API_WEB_PUBLIC_BASE_URL",
@@ -57,6 +53,12 @@ WEB_ENV_FIELD_ORDER = [
     "SUB2API_AUTO_POLICY_RUN_ON_START",
     "ACC_MOTHER_ACCOUNT_EMAIL",
     "CHATGPT_RANDOM_EMAIL_DOMAIN",
+    "SUB2API_OIDC_API_URL",
+    "SUB2API_OIDC_API_KEY",
+    "SUB2API_AUTO_REGISTER_ENABLED",
+    "SUB2API_AUTO_REGISTER_COUNT",
+    "SUB2API_AUTO_REGISTER_THRESHOLD",
+    "SUB2API_AUTO_REGISTER_DOMAIN",
     "OPENAI_ACCESS_TOKEN",
     "OPENAI_ACCOUNT_ID",
     "OPENAI_DEVICE_ID",
@@ -66,6 +68,7 @@ WEB_ENV_FIELD_ORDER = [
     "OPENAI_BASE_URL",
 ]
 WEB_DEFAULT_ENV_VALUES: dict[str, str] = {
+    "SUB2API_SETUP_DONE": "false",
     "SUB2API_BASE_URL": "",
     "SUB2API_ADMIN_API_KEY": "",
     "SUB2API_GROUP_IDS": "",
@@ -77,13 +80,6 @@ WEB_DEFAULT_ENV_VALUES: dict[str, str] = {
     "SUB2API_UPDATE_EXISTING": "true",
     "SUB2API_SKIP_DEFAULT_GROUP_BIND": "false",
     "SUB2API_CONFIRM_MIXED_CHANNEL_RISK": "false",
-    "SUB2API_OAUTH_REDIRECT_URI": "http://localhost:1455/auth/callback",
-    "SUB2API_OAUTH_PROXY_ID": "",
-    "SUB2API_OAUTH_PROXY_URL": "",
-    "SUB2API_OAUTH_PROXY_NAME": "default",
-    "SUB2API_OAUTH_GROUP_IDS": "",
-    "SUB2API_OAUTH_GROUP_NAME": "cc",
-    "SUB2API_OAUTH_ACCOUNT_CONCURRENCY": "10",
     "SUB2API_WEB_PORT": str(WEB_DEFAULT_PORT),
     "SUB2API_WEB_HOST": WEB_DEFAULT_HOST,
     "SUB2API_WEB_PUBLIC_BASE_URL": "",
@@ -93,6 +89,12 @@ WEB_DEFAULT_ENV_VALUES: dict[str, str] = {
     "SUB2API_AUTO_POLICY_RUN_ON_START": "true",
     "ACC_MOTHER_ACCOUNT_EMAIL": "",
     "CHATGPT_RANDOM_EMAIL_DOMAIN": "example.com",
+    "SUB2API_OIDC_API_URL": "",
+    "SUB2API_OIDC_API_KEY": "",
+    "SUB2API_AUTO_REGISTER_ENABLED": "true",
+    "SUB2API_AUTO_REGISTER_COUNT": "3",
+    "SUB2API_AUTO_REGISTER_THRESHOLD": "1",
+    "SUB2API_AUTO_REGISTER_DOMAIN": "",
     "OPENAI_ACCESS_TOKEN": "",
     "OPENAI_ACCOUNT_ID": "",
     "OPENAI_DEVICE_ID": "",
@@ -101,6 +103,73 @@ WEB_DEFAULT_ENV_VALUES: dict[str, str] = {
     "OPENAI_CLIENT_VERSION": seat_core.CLIENT_VERSION,
     "OPENAI_BASE_URL": seat_core.DEFAULT_BASE_URL,
 }
+
+PLACEHOLDER_MARKERS = (
+    "your-",
+    "your_",
+    "your.",
+    "your_",
+    "你的",
+    "示例",
+    "example.com",
+    "sk-admin-xxx",
+)
+
+
+def is_truthy_text(value: Any, *, default: bool = False) -> bool:
+    """Parse common bool-ish strings without importing WebUI utils."""
+
+    text = str(value or "").strip().lower()
+    if not text:
+        return bool(default)
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def has_effective_config_value(key: str, value: Any) -> bool:
+    """Treat empty and template placeholder values as not configured."""
+
+    text = str(value or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    if key in {"SUB2API_BASE_URL", "SUB2API_ADMIN_API_KEY", "SUB2API_AUTO_REGISTER_DOMAIN"}:
+        return not any(marker in lowered for marker in PLACEHOLDER_MARKERS)
+    return True
+
+
+def get_setup_missing_fields(values: dict[str, str]) -> list[str]:
+    """Return user-facing setup requirements still missing."""
+
+    required_labels = (
+        ("SUB2API_BASE_URL", "Sub2API 地址"),
+        ("SUB2API_ADMIN_API_KEY", "Sub2API 管理员 API Key"),
+        ("ACC_MOTHER_ACCOUNT_EMAIL", "母号邮箱"),
+        ("SUB2API_OIDC_API_URL", "OIDC API 地址"),
+        ("SUB2API_OIDC_API_KEY", "OIDC API Key"),
+        ("SUB2API_AUTO_REGISTER_DOMAIN", "自动注册邮箱域名"),
+    )
+    missing = [
+        label
+        for key, label in required_labels
+        if not has_effective_config_value(key, values.get(key, ""))
+    ]
+    has_account_id = has_effective_config_value("OPENAI_ACCOUNT_ID", values.get("OPENAI_ACCOUNT_ID", ""))
+    has_token = has_effective_config_value("OPENAI_ACCESS_TOKEN", values.get("OPENAI_ACCESS_TOKEN", "")) or has_effective_config_value(
+        "OPENAI_SESSION_TOKEN", values.get("OPENAI_SESSION_TOKEN", "")
+    )
+    if not has_account_id or not has_token:
+        missing.append("母号 ACC 内容")
+    return missing
+
+
+def is_setup_complete(values: dict[str, str]) -> bool:
+    """A console is considered installed only after setup is explicitly saved."""
+
+    return is_truthy_text(values.get(SETUP_DONE_KEY), default=False) and not get_setup_missing_fields(values)
 
 
 def parse_env_value(raw_value: str) -> str:
