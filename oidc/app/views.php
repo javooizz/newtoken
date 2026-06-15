@@ -68,3 +68,40 @@ function app_settings_form_html(array $config, $csrf)
 
     return '<div class="card"><div class="section-title"><h3>系统设置</h3><span class="badge">会写入 app/config.php</span></div><div class="alert info"><strong>说明：</strong> OpenAI 后台的应用创建、声明配置、应用链接配置不在这里做。<br>这里仅用于保存 OpenAI 最终生成的 <code>Client ID</code>、<code>Client Secret</code> 和 <code>Login redirect URI</code> 白名单。</div><form method="post" action="/admin/settings/save" class="stack"><input type="hidden" name="csrf_token" value="' . app_h($csrf) . '"><div class="form-grid"><div class="field"><label>应用地址</label><input type="url" name="app_url" value="' . app_h($config['app_url']) . '" required></div><div class="field"><label>允许的邮箱后缀</label><input type="text" name="allowed_email_domains" value="' . app_h($domains) . '" required></div><div class="field"><label>OIDC Issuer</label><input type="url" name="oidc_issuer" value="' . app_h($config['oidc_issuer']) . '" required></div><div class="field"><label>WebUI API Key</label><input class="mono" type="text" name="api_key" value="' . app_h(isset($config['api_key']) ? $config['api_key'] : '') . '"><div class="hint">复制到 WebUI 的 <code>SUB2API_OIDC_API_KEY</code>。修改后 WebUI 侧也要同步更新。</div></div><div class="field"><label>OIDC 客户端 ID</label><input type="text" name="oidc_client_id" value="' . app_h($config['oidc_client_id']) . '"></div><div class="field"><label>OIDC 客户端 Secret</label><input type="text" name="oidc_client_secret" value="' . app_h($config['oidc_client_secret']) . '"></div><div class="field"><label>Access Token 有效期</label><input type="number" name="oidc_access_token_ttl" value="' . app_h($config['oidc_access_token_ttl']) . '" min="60" required></div><div class="field"><label>ID Token 有效期</label><input type="number" name="oidc_id_token_ttl" value="' . app_h($config['oidc_id_token_ttl']) . '" min="60" required></div><div class="field"><label>授权码有效期</label><input type="number" name="oidc_auth_code_ttl" value="' . app_h($config['oidc_auth_code_ttl']) . '" min="30" required></div></div><div class="field"><label>OpenAI 回调白名单（Login redirect URI）</label><textarea name="oidc_redirect_uris" required>' . app_h($redirects) . '</textarea><div class="hint">每行一个 OpenAI 后台生成的 Login redirect URI，必须精确匹配。不要在这里填你自己的域名地址。</div></div><div class="actions"><button type="submit">保存设置</button></div></form></div>';
 }
+
+function app_admin_clients_html(array $clients, $created, $revealed, string $csrf): string
+{
+    $createdHtml = '';
+    if ($created) {
+        $cfg = $created['openai_config'];
+        $createdHtml = '<section class="card"><div class="section-title"><h3>新建成功 — 请立刻复制</h3><span class="badge">Secret 仅展示一次</span></div><div class="code-panel mono">client_id: ' . app_h($created['client_id']) . '<br>client_secret: ' . app_h($created['client_secret']) . '<br>issuer: ' . app_h($cfg['issuer']) . '<br>discovery: ' . app_h($cfg['discovery_url']) . '<br>scopes: ' . app_h($cfg['scopes']) . '</div></section>';
+    }
+    if ($revealed) {
+        $createdHtml .= '<section class="card"><div class="section-title"><h3>Secret（' . app_h($revealed['client_id']) . '）</h3></div><div class="code-panel mono">' . app_h($revealed['client_secret']) . '</div></section>';
+    }
+
+    $rows = '';
+    foreach ($clients as $c) {
+        $domains = implode(', ', $c['domains']);
+        $ru = json_decode($c['redirect_uris'] ?? '[]', true) ?: [];
+        $ruText = implode("\n", $ru);
+        $domText = implode("\n", $c['domains']);
+        $statusLabel = $c['status'] === 'active' ? '启用' : '停用';
+        $toggle = $c['status'] === 'active' ? 'disabled' : 'active';
+        $toggleLabel = $c['status'] === 'active' ? '停用' : '启用';
+        $rows .= '<tr><td>' . app_h($c['name']) . '</td><td class="mono">' . app_h($c['client_id']) . '</td><td>' . app_h($domains) . '</td><td>' . app_h($statusLabel) . '</td><td>'
+            . '<div class="actions">'
+            . '<form method="post" action="/admin/clients/reveal" onsubmit="return confirm(\'确认显示明文 Secret？此操作会写入审计日志。\')"><input type="hidden" name="csrf_token" value="' . app_h($csrf) . '"><input type="hidden" name="client_id" value="' . app_h($c['client_id']) . '"><button class="inline secondary" type="submit">显示 Secret</button></form>'
+            . '<form method="post" action="/admin/clients/rotate" onsubmit="return confirm(\'确认轮换 Secret？旧值立即失效。\')"><input type="hidden" name="csrf_token" value="' . app_h($csrf) . '"><input type="hidden" name="client_id" value="' . app_h($c['client_id']) . '"><button class="inline warn" type="submit">轮换 Secret</button></form>'
+            . '<form method="post" action="/admin/clients/status"><input type="hidden" name="csrf_token" value="' . app_h($csrf) . '"><input type="hidden" name="client_id" value="' . app_h($c['client_id']) . '"><input type="hidden" name="status" value="' . $toggle . '"><button class="inline secondary" type="submit">' . $toggleLabel . '</button></form>'
+            . '</div>'
+            . '<details><summary>编辑回调/域名</summary><form method="post" action="/admin/clients/update" class="stack"><input type="hidden" name="csrf_token" value="' . app_h($csrf) . '"><input type="hidden" name="client_id" value="' . app_h($c['client_id']) . '"><div class="field"><label>名称</label><input type="text" name="name" value="' . app_h($c['name']) . '"></div><div class="field"><label>回调白名单（每行一个）</label><textarea name="redirect_uris">' . app_h($ruText) . '</textarea></div><div class="field"><label>允许域名（每行一个）</label><textarea name="allowed_domains">' . app_h($domText) . '</textarea></div><div class="actions"><button type="submit">保存</button></div></form></details>'
+            . '</td></tr>';
+    }
+
+    $body = '<section class="hero"><span class="pill">母号管理</span><h1>OpenAI team 母号</h1><p>每个母号一对独立 Client ID/Secret + 独立域名。新增后到 OpenAI 后台填 issuer/discovery + 这里的 client_id/secret，再把 OpenAI 回调填回回调白名单。</p><div class="actions" style="margin-top:12px"><a class="button-link inline secondary" href="/admin">返回后台</a></div></section>';
+    $body .= $createdHtml;
+    $body .= '<section class="card"><div class="section-title"><h3>新建母号</h3></div><form method="post" action="/admin/clients/create" class="stack"><input type="hidden" name="csrf_token" value="' . app_h($csrf) . '"><div class="form-grid"><div class="field"><label>母号名称</label><input type="text" name="name" placeholder="母号A-1bool.com" required></div><div class="field"><label>备注</label><input type="text" name="note"></div></div><div class="field"><label>OpenAI 回调白名单（每行一个，OpenAI 创建连接后回填）</label><textarea name="redirect_uris" placeholder="https://external.auth.openai.com/sso/oidc/XXXX/callback"></textarea></div><div class="field"><label>允许邮箱域名（每行一个）</label><textarea name="allowed_domains" placeholder="1bool.com" required></textarea></div><div class="actions"><button type="submit">创建母号</button></div></form></section>';
+    $body .= '<section class="card"><div class="section-title"><h3>母号列表</h3></div><div class="table-wrap"><table><tr><th>名称</th><th>Client ID</th><th>域名</th><th>状态</th><th>操作</th></tr>' . $rows . '</table></div></section>';
+    return $body;
+}

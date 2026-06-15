@@ -211,3 +211,8 @@ function app_admin_enable_user($adminId, $userId)
 
     app_audit('admin', $adminId, 'user_enabled', 'user', (string) $userId, []);
 }
+
+function app_admin_clients()
+{
+    return app_client_list();
+}

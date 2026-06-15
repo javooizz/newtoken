@@ -588,6 +588,87 @@ if ($path === '/admin/settings/save' && app_is_post()) {
     app_redirect('/admin');
 }
 
+if ($path === '/admin/clients') {
+    $admin = app_require_admin();
+    $created = $_SESSION['__client_created'] ?? null;
+    unset($_SESSION['__client_created']);
+    $revealed = $_SESSION['__client_revealed'] ?? null;
+    unset($_SESSION['__client_revealed']);
+    app_render_page('母号管理', app_admin_clients_html(app_admin_clients(), $created, $revealed, app_issue_csrf_token('admin_clients')));
+}
+
+if ($path === '/admin/clients/create' && app_is_post()) {
+    $admin = app_require_admin();
+    if (!app_validate_csrf_token('admin_clients', app_post('csrf_token'))) { app_flash_set('error', 'CSRF 校验失败。'); app_redirect('/admin/clients'); }
+    try {
+        $res = app_client_create([
+            'name' => app_post('name'),
+            'redirect_uris' => app_parse_csvish(app_post('redirect_uris')),
+            'allowed_domains' => app_parse_csvish(app_post('allowed_domains')),
+            'note' => app_post('note'),
+        ], (int) $admin['id']);
+        $_SESSION['__client_created'] = $res;
+        app_flash_set('success', '母号已创建：' . $res['client_id'] . '。请立刻复制 Client Secret，仅展示一次。');
+    } catch (Exception $e) {
+        app_flash_set('error', $e->getMessage());
+    }
+    app_redirect('/admin/clients');
+}
+
+if ($path === '/admin/clients/update' && app_is_post()) {
+    $admin = app_require_admin();
+    if (!app_validate_csrf_token('admin_clients', app_post('csrf_token'))) { app_flash_set('error', 'CSRF 校验失败。'); app_redirect('/admin/clients'); }
+    try {
+        app_client_update(app_post('client_id'), [
+            'name' => app_post('name'),
+            'redirect_uris' => app_parse_csvish(app_post('redirect_uris')),
+            'allowed_domains' => app_parse_csvish(app_post('allowed_domains')),
+        ], (int) $admin['id']);
+        app_flash_set('success', '母号已更新。');
+    } catch (Exception $e) {
+        app_flash_set('error', $e->getMessage());
+    }
+    app_redirect('/admin/clients');
+}
+
+if ($path === '/admin/clients/status' && app_is_post()) {
+    $admin = app_require_admin();
+    if (!app_validate_csrf_token('admin_clients', app_post('csrf_token'))) { app_flash_set('error', 'CSRF 校验失败。'); app_redirect('/admin/clients'); }
+    try {
+        app_client_update(app_post('client_id'), ['status' => app_post('status') === 'disabled' ? 'disabled' : 'active'], (int) $admin['id']);
+        app_flash_set('success', '母号状态已更新。');
+    } catch (Exception $e) {
+        app_flash_set('error', $e->getMessage());
+    }
+    app_redirect('/admin/clients');
+}
+
+if ($path === '/admin/clients/rotate' && app_is_post()) {
+    $admin = app_require_admin();
+    if (!app_validate_csrf_token('admin_clients', app_post('csrf_token'))) { app_flash_set('error', 'CSRF 校验失败。'); app_redirect('/admin/clients'); }
+    try {
+        $secret = app_client_rotate_secret(app_post('client_id'), (int) $admin['id']);
+        $_SESSION['__client_revealed'] = ['client_id' => app_post('client_id'), 'client_secret' => $secret];
+        app_flash_set('success', '已轮换 Secret，请立刻复制。');
+    } catch (Exception $e) {
+        app_flash_set('error', $e->getMessage());
+    }
+    app_redirect('/admin/clients');
+}
+
+if ($path === '/admin/clients/reveal' && app_is_post()) {
+    $admin = app_require_admin();
+    if (!app_validate_csrf_token('admin_clients', app_post('csrf_token'))) { app_flash_set('error', 'CSRF 校验失败。'); app_redirect('/admin/clients'); }
+    try {
+        $secret = app_client_reveal_secret(app_post('client_id'));
+        app_audit('admin', (int) $admin['id'], 'client_secret_revealed', 'client', app_post('client_id'), ['via' => 'admin']);
+        $_SESSION['__client_revealed'] = ['client_id' => app_post('client_id'), 'client_secret' => $secret];
+    } catch (Exception $e) {
+        app_flash_set('error', $e->getMessage());
+    }
+    app_redirect('/admin/clients');
+}
+
 if ($path === '/admin') {
     $admin = app_require_admin();
     $batchRows = app_admin_batches();
@@ -599,7 +680,7 @@ if ($path === '/admin') {
     $cardLookupResult = app_query('card_lookup') === '1' && $cardLookupInput !== '' ? app_admin_find_card_by_plain($cardLookupInput) : null;
     $unusedCount = app_db_one("SELECT COUNT(*) AS c FROM card_keys WHERE status = 'unused'");
     $activeUsers = app_db_one("SELECT COUNT(*) AS c FROM users WHERE status = 'active'");
-    $body = '<section class="hero"><span class="pill">管理工作区</span><h1>管理后台</h1><p>当前登录管理员：<strong>' . app_h($admin['username']) . '</strong>。用户侧现在是纯卡密登录，卡密本身就是用户凭证。</p><div class="actions" style="margin-top:16px"><form method="post" action="/admin/logout"><input type="hidden" name="csrf_token" value="' . app_h(app_issue_csrf_token('admin_logout')) . '"><button class="inline secondary" type="submit">退出后台</button></form></div></section>';
+    $body = '<section class="hero"><span class="pill">管理工作区</span><h1>管理后台</h1><p>当前登录管理员：<strong>' . app_h($admin['username']) . '</strong>。用户侧现在是纯卡密登录，卡密本身就是用户凭证。</p><div class="actions" style="margin-top:16px"><a class="button-link inline secondary" href="/admin/clients">母号管理</a><form method="post" action="/admin/logout"><input type="hidden" name="csrf_token" value="' . app_h(app_issue_csrf_token('admin_logout')) . '"><button class="inline secondary" type="submit">退出后台</button></form></div></section>';
     $body .= '<section class="grid"><div class="card"><div class="small">未绑定卡密</div><div class="metric">' . app_h(isset($unusedCount['c']) ? $unusedCount['c'] : 0) . '</div></div><div class="card"><div class="small">启用用户</div><div class="metric">' . app_h(isset($activeUsers['c']) ? $activeUsers['c'] : 0) . '</div></div><div class="card"><div class="small">OIDC 标识地址</div><div class="metric mono" style="font-size:18px">' . app_h($config['oidc_issuer']) . '</div></div></section>';
     $body .= '<section class="split"><div>';
     $body .= '<div class="card"><div class="section-title"><h3>创建卡密批次</h3><span class="badge">一次性导出</span></div><form method="post" action="/admin/cards/generate" class="stack"><input type="hidden" name="csrf_token" value="' . app_h(app_issue_csrf_token('admin_cards')) . '"><div class="form-grid"><div class="field"><label>数量</label><input type="number" name="count" min="1" max="500" value="10" required></div><div class="field"><label>有效天数（0 表示不过期）</label><input type="number" name="expires_in_days" min="0" value="30"></div></div><div class="field"><label>批次备注</label><textarea name="note" placeholder="例如：2026-Q2 社区发卡"></textarea></div><div class="actions"><button type="submit">生成批次</button></div></form></div>';
