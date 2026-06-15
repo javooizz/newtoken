@@ -24,7 +24,7 @@ const actionNames = {
   delete_no_quota: '删除无额度',
   delete_auth_error: '删除 401',
   delete_dead: '删除死号',
-  auto_maintenance: '远程扫描',
+  auto_maintenance: '一键全维护',
   register_accounts: '自动注册',
   low_quota_policy: '席位策略',
   convert: '转换校验',
