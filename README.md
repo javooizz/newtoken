@@ -1,5 +1,5 @@
 # Sub2API 独立工具
-全部教程 在 https://app.notion.com/p/48-ChatGPT-Team-23-6-25-37f435e8d42d803f8a13dfea1c765c10
+
 只保留 `Sub2API + ACC 席位管理` 的单页工具公开版。
 
 ## 功能
@@ -21,6 +21,52 @@ py .\sub2api_standalone_tool.py
 
 ```text
 启动Sub2API独立工具.bat
+```
+
+## Linux WebUI 部署
+
+WebUI 入口文件是 `entry.py`，不依赖 Flask、FastAPI、requests、PySocks，只使用 Python 标准库。默认监听端口是 `28463`，避开了常见的 80、443、8080、3000 等端口。
+
+```bash
+cd /www/wwwroot/newtoken-main
+python3 entry.py
+```
+
+也可以显式指定监听地址和端口：
+
+```bash
+python3 entry.py --host 0.0.0.0 --port 28463
+```
+
+宝塔面板部署建议：
+
+- 上传项目到 `/www/wwwroot/newtoken-main`
+- Python 项目启动文件填 `entry.py`
+- 启动命令填 `python3 entry.py --host 0.0.0.0 --port 28463`
+- 在宝塔安全、防火墙和云服务器安全组里放行 `28463`
+- 公网开放前务必配置 `SUB2API_WEB_SECRET`
+
+`.env` 示例：
+
+```dotenv
+SUB2API_BASE_URL=https://your-sub2api-host
+SUB2API_ADMIN_API_KEY=your-admin-key
+SUB2API_WEB_HOST=0.0.0.0
+SUB2API_WEB_PORT=28463
+SUB2API_WEB_SECRET=change-this-password
+SUB2API_OUTBOUND_PROXY_URL=socks5://127.0.0.1:1080
+```
+
+带账号密码的 SOCKS5 写法：
+
+```dotenv
+SUB2API_OUTBOUND_PROXY_URL=socks5://user:pass@127.0.0.1:1080
+```
+
+如果希望代理端解析域名，可以写成：
+
+```dotenv
+SUB2API_OUTBOUND_PROXY_URL=socks5h://127.0.0.1:1080
 ```
 
 ## 打包 exe

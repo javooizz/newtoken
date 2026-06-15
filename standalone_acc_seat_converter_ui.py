@@ -679,8 +679,9 @@ class StandaloneAccSeatConverterApp:
         self.toggle_button.pack(side=tk.LEFT, padx=(8, 0))
         self.set_default_button = ttk.Button(
             button_frame,
-            text="设为 ChatGPT",
+            text="禁改 ChatGPT",
             command=lambda: self.set_selected_user_seat(SEAT_ACTIONS["ChatGPT"]),
+            state=tk.DISABLED,
         )
         self.set_default_button.pack(side=tk.LEFT, padx=(8, 0))
         self.set_usage_based_button = ttk.Button(
@@ -1028,24 +1029,9 @@ class StandaloneAccSeatConverterApp:
         user: dict[str, Any],
         snapshot: Sub2APIUsageSnapshot | None,
     ) -> bool:
-        """判断当前成员是否应该自动升回 ChatGPT。"""
+        """当前底层架构禁止 Codex 自动升回 ChatGPT。"""
 
-        if not self.is_codex_seat_type(user.get("seat_type")):
-            return False
-        if self.is_mother_user(user):
-            return False
-        if self.is_promotion_probe_in_cooldown(user):
-            return False
-        if snapshot is None:
-            return True
-        if self.is_snapshot_reset_due(snapshot, window="7d"):
-            return True
-        if not self.has_remaining_quota(snapshot, window="7d"):
-            return False
-        return self.has_remaining_quota(snapshot, window="5h") or self.is_snapshot_reset_due(
-            snapshot,
-            window="5h",
-        )
+        return False
 
     def get_remote_plan_type_lookup(
         self,
@@ -2206,15 +2192,10 @@ class StandaloneAccSeatConverterApp:
         """执行按额度自动切席位的主策略。"""
 
         demote_users: list[dict[str, Any]] = []
-        promote_candidates: list[dict[str, Any]] = []
         current_chatgpt_count = self.count_chatgpt_users()
 
         for user in self.current_users:
-            snapshot = (
-                self.get_user_promotion_reference_snapshot(user)
-                if self.is_codex_seat_type(user.get("seat_type"))
-                else self.get_user_policy_snapshot(user)
-            )
+            snapshot = self.get_user_policy_snapshot(user)
             if self.should_demote_user_to_codex(user, snapshot):
                 demote_users.append(user)
                 self.write_log(
@@ -2224,35 +2205,19 @@ class StandaloneAccSeatConverterApp:
                     f"5h={getattr(snapshot, 'quota_5h_text', '--')} "
                     f"7d={getattr(snapshot, 'quota_7d_text', '--')}"
                 )
-            elif self.should_promote_user_to_chatgpt(user, snapshot):
-                promote_candidates.append(user)
-                self.write_log(
-                    "[AUTO][PROMOTE][CANDIDATE] "
-                    f"{normalize_email(user.get('email'))} "
-                    f"seat={user.get('seat_type')} "
-                    f"local5h={getattr(snapshot, 'quota_5h_text', '--')} "
-                    f"local7d={getattr(snapshot, 'quota_7d_text', '--')}"
-                )
 
-        promote_candidates.sort(key=self.rank_promotion_candidate)
         available_chatgpt_slots = max(
             0,
             self.get_chatgpt_seat_limit() - (current_chatgpt_count - len(demote_users)),
         )
         self.write_log(
             "[AUTO][PLAN] "
-            f"demote={len(demote_users)} promote_candidates={len(promote_candidates)} "
+            f"demote={len(demote_users)} promote_candidates=0 "
             f"available_slots={available_chatgpt_slots}"
         )
-        promote_probe_users: list[dict[str, Any]] = []
         refreshed_usage_result: Sub2APIUsageLoadResult | None = None
-        if available_chatgpt_slots > 0 and promote_candidates:
-            refreshed_usage_result = self.refresh_remote_candidates_for_promotion(
-                promote_candidates
-            )
-            promote_probe_users = list(promote_candidates)
 
-        if not demote_users and not promote_probe_users:
+        if not demote_users:
             return {
                 "changed": False,
                 "users": [],
@@ -2260,8 +2225,8 @@ class StandaloneAccSeatConverterApp:
                 "promoted_count": 0,
                 "demote_remote_ids": [],
                 "promote_remote_ids": [],
-                "refreshed_candidates": len(promote_candidates),
-                "skipped_promotions": max(0, len(promote_candidates) - len(promote_probe_users)),
+                "refreshed_candidates": 0,
+                "skipped_promotions": 0,
             }
 
         client = self.build_client()
@@ -2281,17 +2246,9 @@ class StandaloneAccSeatConverterApp:
             expected_status="active",
             lookup=remote_lookup_for_actions,
         )
-        promote_remote_ids = self.collect_remote_account_ids_for_users(
-            promote_probe_users[:available_chatgpt_slots],
-            expected_status="inactive",
-            lookup=remote_lookup_for_actions,
-        )
-
         demoted_count = 0
         promoted_count = 0
-        confirmed_promote_users: list[dict[str, Any]] = []
         probe_remote_refresh_count = 0
-        attempted_promotion_count = 0
         for user in demote_users:
             self.write_log(
                 f"[AUTO][DEMOTE][APPLY] {normalize_email(user.get('email'))} -> Codex"
@@ -2353,220 +2310,6 @@ class StandaloneAccSeatConverterApp:
                 "已保留本地可信额度与刷新时间，仅同步远程调用状态为 inactive"
             )
 
-        for user in promote_probe_users:
-            if promoted_count >= available_chatgpt_slots:
-                remaining_candidates = max(
-                    0,
-                    len(promote_probe_users) - attempted_promotion_count,
-                )
-                if remaining_candidates > 0:
-                    self.write_log(
-                        "[AUTO][PROMOTE][STOP] "
-                        f"已补满 {promoted_count}/{available_chatgpt_slots}，剩余 {remaining_candidates} 个候选不再继续探测"
-                    )
-                break
-            attempted_promotion_count += 1
-            email_address = normalize_email(user.get("email"))
-            if self.get_user_promotion_reference_snapshot(user) is None:
-                self.write_log(
-                    "[AUTO][PROMOTE][CACHE_MISS_PROBE] "
-                    f"{email_address} 当前缺少本地可信额度缓存，进入兜底探测"
-                )
-            if not self.ensure_chatgpt_seat_available_runtime(
-                client,
-                user,
-                SEAT_ACTIONS["ChatGPT"],
-                log_prefix=f"[AUTO][PROMOTE][CHECK] {email_address}",
-                raise_on_limit=False,
-            ):
-                self.write_log(
-                    f"[AUTO][PROMOTE][SKIP] {email_address} 当前 ChatGPT 已达上限"
-                )
-                continue
-            self.write_log(f"[AUTO][PROMOTE][PROBE] {email_address} 临时转 ChatGPT")
-            core.ensure_user_seat(
-                client,
-                user_id=str(user.get("id", "")),
-                email=None,
-                target_seat_type=SEAT_ACTIONS["ChatGPT"],
-            )
-            probe_remote_ids = self.collect_remote_account_ids_for_users(
-                [user],
-                lookup=remote_lookup_for_actions,
-            )
-            if probe_remote_ids:
-                probe_transition = self.refresh_remote_tokens_after_seat_change(
-                    probe_remote_ids,
-                    log_prefix="[AUTO][PROMOTE]",
-                )
-                refreshed_probe_ids = self.normalize_remote_account_ids(
-                    probe_transition.get("refreshed_remote_ids") or []
-                )
-                probe_remote_refresh_count += len(refreshed_probe_ids)
-                if refreshed_probe_ids and not probe_transition.get("blocked"):
-                    refreshed_usage_result = load_sub2api_usage_lookup()
-                    remote_lookup_for_actions = dict(refreshed_usage_result.lookup)
-                    remote_summaries_for_actions = list(refreshed_usage_result.summaries)
-                    self.store_usage_load_result_locally(refreshed_usage_result)
-                else:
-                    if probe_transition.get("blocked"):
-                        self.write_log(
-                            "[AUTO][PROMOTE][REVERT][REASON] "
-                            f"{email_address} refresh 命中限流或 usage_limit_reached"
-                        )
-                    elif not refreshed_probe_ids:
-                        self.write_log(
-                            "[AUTO][PROMOTE][REVERT][REASON] "
-                            f"{email_address} recover-state 或 refresh token 未成功"
-                        )
-                    self.write_log(f"[AUTO][PROMOTE][REVERT] {email_address} 回退 Codex")
-                    core.ensure_user_seat(
-                        client,
-                        user_id=str(user.get('id', '')),
-                        email=None,
-                        target_seat_type=SEAT_ACTIONS["Codex"],
-                    )
-                    reverted_remote_ids = self.collect_remote_account_ids_for_users(
-                        [user],
-                        lookup=remote_lookup_for_actions,
-                    )
-                    self.refresh_remote_tokens_after_seat_change(
-                        reverted_remote_ids,
-                        log_prefix="[AUTO][PROMOTE][REVERT]",
-                        keep_local_cache_message="回退 Codex 后仅 refresh token，不回写远程假额度",
-                    )
-                    if reverted_remote_ids:
-                        revert_disable_result = set_remote_accounts_inactive(reverted_remote_ids)
-                        self.log_remote_batch_result(
-                            "[AUTO][PROMOTE][REVERT]",
-                            "[DISABLE]",
-                            revert_disable_result,
-                            fallback_ids=reverted_remote_ids,
-                        )
-                        reverted_success_ids = self.extract_remote_success_ids(
-                            revert_disable_result,
-                            fallback_ids=reverted_remote_ids,
-                        )
-                        remote_lookup_for_actions = self.build_usage_lookup_with_status(
-                            remote_lookup_for_actions,
-                            reverted_success_ids,
-                            "inactive",
-                        )
-                        remote_summaries_for_actions = self.build_remote_account_summaries_with_status(
-                            remote_summaries_for_actions,
-                            reverted_success_ids,
-                            "inactive",
-                        )
-                    self.mark_promotion_probe_cooldown(user, None)
-                    continue
-            candidate_snapshot = self.get_snapshot_for_email(
-                user.get("email", ""),
-                remote_lookup_for_actions,
-            )
-            candidate_email = normalize_email(user.get("email"))
-            if candidate_snapshot is not None:
-                self.write_log(
-                    "[AUTO][PROMOTE][REFRESHED] "
-                    f"{candidate_email} 5h={candidate_snapshot.quota_5h_text} "
-                    f"7d={candidate_snapshot.quota_7d_text} "
-                    f"status={candidate_snapshot.account_status or '--'} "
-                    f"updated={candidate_snapshot.usage_updated_at or '--'}"
-                )
-            if candidate_email and candidate_snapshot is not None:
-                self.remember_trusted_snapshot(
-                    candidate_email,
-                    candidate_snapshot,
-                    remote_summaries_for_actions,
-                )
-            if not self.should_revert_promoted_user_after_probe(
-                user,
-                remote_lookup_for_actions,
-                remote_summaries_for_actions,
-            ):
-                confirmed_promote_users.append(user)
-                self.clear_promotion_probe_cooldown(user)
-                self.write_log(f"[AUTO][PROMOTE][KEEP] {candidate_email} 保留 ChatGPT")
-                promoted_count += 1
-                continue
-            self.write_log(f"[AUTO][PROMOTE][REVERT] {candidate_email} 回退 Codex")
-            core.ensure_user_seat(
-                client,
-                user_id=str(user.get("id", "")),
-                email=None,
-                target_seat_type=SEAT_ACTIONS["Codex"],
-            )
-            reverted_remote_ids = self.collect_remote_account_ids_for_users(
-                [user],
-                lookup=remote_lookup_for_actions,
-            )
-            self.refresh_remote_tokens_after_seat_change(
-                reverted_remote_ids,
-                log_prefix="[AUTO][PROMOTE][REVERT]",
-                keep_local_cache_message="回退 Codex 后仅 refresh token，不回写远程假额度",
-            )
-            if reverted_remote_ids:
-                revert_disable_result = set_remote_accounts_inactive(reverted_remote_ids)
-                self.log_remote_batch_result(
-                    "[AUTO][PROMOTE][REVERT]",
-                    "[DISABLE]",
-                    revert_disable_result,
-                    fallback_ids=reverted_remote_ids,
-                )
-                reverted_success_ids = self.extract_remote_success_ids(
-                    revert_disable_result,
-                    fallback_ids=reverted_remote_ids,
-                )
-                remote_lookup_for_actions = self.build_usage_lookup_with_status(
-                    remote_lookup_for_actions,
-                    reverted_success_ids,
-                    "inactive",
-                )
-                remote_summaries_for_actions = self.build_remote_account_summaries_with_status(
-                    remote_summaries_for_actions,
-                    reverted_success_ids,
-                    "inactive",
-                )
-            self.mark_promotion_probe_cooldown(user, candidate_snapshot)
-
-        promote_remote_ids = self.collect_remote_account_ids_for_users(
-            confirmed_promote_users,
-            expected_status="inactive",
-            lookup=remote_lookup_for_actions,
-        )
-
-        if promote_remote_ids:
-            self.write_log(
-                f"[AUTO][PROMOTE][ENABLE] confirmed={len(confirmed_promote_users)} remote_ids={promote_remote_ids}"
-            )
-            enable_result = set_remote_accounts_status(promote_remote_ids, "active")
-            self.log_remote_batch_result(
-                "[AUTO][PROMOTE]",
-                "[ENABLE]",
-                enable_result,
-                fallback_ids=promote_remote_ids,
-            )
-            promote_remote_ids = self.extract_remote_success_ids(
-                enable_result,
-                fallback_ids=promote_remote_ids,
-            )
-            remote_lookup_for_actions = self.build_usage_lookup_with_status(
-                remote_lookup_for_actions,
-                promote_remote_ids,
-                "active",
-            )
-            remote_summaries_for_actions = self.build_remote_account_summaries_with_status(
-                remote_summaries_for_actions,
-                promote_remote_ids,
-                "active",
-            )
-            self.remote_usage_lookup = dict(remote_lookup_for_actions)
-            self.remote_account_summaries = list(remote_summaries_for_actions)
-            self.trusted_usage_lookup = self.merge_trusted_usage_lookup(
-                self.remote_usage_lookup,
-                self.remote_account_summaries,
-            )
-            write_usage_cache(USAGE_CACHE_PATH, self.trusted_usage_lookup)
-
         refreshed_users = list_all_users(client, query="")
         return {
             "changed": True,
@@ -2574,9 +2317,9 @@ class StandaloneAccSeatConverterApp:
             "demoted_count": demoted_count,
             "promoted_count": promoted_count,
             "demote_remote_ids": demote_remote_ids,
-            "promote_remote_ids": promote_remote_ids,
+            "promote_remote_ids": [],
             "refreshed_candidates": probe_remote_refresh_count,
-            "skipped_promotions": max(0, len(promote_candidates) - attempted_promotion_count),
+            "skipped_promotions": 0,
             "latest_usage_result": refreshed_usage_result,
         }
 
@@ -3368,19 +3111,19 @@ class StandaloneAccSeatConverterApp:
 
         if not bool(self.tree.selection()):
             self.toggle_button.configure(text="切换席位")
-            self.set_default_button.configure(text="设为 ChatGPT")
+            self.set_default_button.configure(text="禁改 ChatGPT")
             self.set_usage_based_button.configure(text="设为 Codex")
             return
         try:
             user = self.get_selected_user()
         except core.SeatApiError:
             self.toggle_button.configure(text="切换席位")
-            self.set_default_button.configure(text="设为 ChatGPT")
+            self.set_default_button.configure(text="禁改 ChatGPT")
             self.set_usage_based_button.configure(text="设为 Codex")
             return
         if not self.is_mother_user(user):
             self.toggle_button.configure(text="切换席位")
-            self.set_default_button.configure(text="设为 ChatGPT")
+            self.set_default_button.configure(text="禁改 ChatGPT")
             self.set_usage_based_button.configure(text="设为 Codex")
             return
         if self.is_chatgpt_seat_type(user.get("seat_type")):
@@ -3596,6 +3339,9 @@ class StandaloneAccSeatConverterApp:
             except core.SeatApiError:
                 selected_user = None
         mother_selected = self.is_mother_user(selected_user)
+        selected_is_codex = bool(
+            selected_user and self.is_codex_seat_type(selected_user.get("seat_type"))
+        )
         mother_is_codex = mother_selected and not self.is_chatgpt_seat_type(
             selected_user.get("seat_type") if selected_user else None
         )
@@ -3618,17 +3364,11 @@ class StandaloneAccSeatConverterApp:
         self.toggle_button.configure(
             state=(
                 tk.DISABLED
-                if (not can_modify or mother_is_codex)
+                if (not can_modify or mother_is_codex or selected_is_codex)
                 else tk.NORMAL
             )
         )
-        self.set_default_button.configure(
-            state=(
-                tk.DISABLED
-                if (not can_modify or mother_selected)
-                else tk.NORMAL
-            )
-        )
+        self.set_default_button.configure(state=tk.DISABLED)
         self.set_usage_based_button.configure(state=tk.NORMAL if can_modify else tk.DISABLED)
         self.update_seat_action_buttons()
 

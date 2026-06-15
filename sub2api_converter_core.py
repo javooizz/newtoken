@@ -2,10 +2,10 @@ import base64
 import copy
 import json
 import os
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+from sub2api_http_client import request_json as http_request_json
 
 DEFAULT_OUTPUT_MODE = "sub"
 OUTPUT_MODE_LABEL = "Sub 形式"
@@ -298,30 +298,13 @@ def request_json(
 ):
     """发起 JSON 请求，并把成功和 HTTP 错误都统一成可继续处理的结构。"""
 
-    encoded_body = None
-    request_headers = dict(headers or {})
-    if json_body is not None:
-        encoded_body = json.dumps(json_body).encode("utf-8")
-        request_headers.setdefault("Content-Type", "application/json")
-    request = urllib.request.Request(
-        url, data=encoded_body, headers=request_headers, method=method
+    return http_request_json(
+        url,
+        method=method,
+        headers=headers,
+        json_body=json_body,
+        timeout=timeout,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            body_text = response.read().decode("utf-8", errors="replace")
-            payload = json.loads(body_text) if body_text.strip() else None
-            return response.status, body_text, payload
-    except urllib.error.HTTPError as exc:
-        body_text = exc.read().decode("utf-8", errors="replace")
-        payload = None
-        if body_text.strip():
-            try:
-                payload = json.loads(body_text)
-            except json.JSONDecodeError:
-                payload = None
-        return exc.code, body_text, payload
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"网络请求失败: {exc.reason}") from exc
 
 
 def refresh_access_token_if_needed(record):

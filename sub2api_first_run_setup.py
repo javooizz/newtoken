@@ -15,6 +15,7 @@ ENV_FIELD_ORDER = [
     "SUB2API_ADMIN_API_KEY",
     "SUB2API_GROUP_IDS",
     "SUB2API_PROXY_ID",
+    "SUB2API_OUTBOUND_PROXY_URL",
     "SUB2API_IMPORT_CONCURRENCY",
     "SUB2API_IMPORT_PRIORITY",
     "SUB2API_UPDATE_EXISTING",
@@ -27,6 +28,9 @@ ENV_FIELD_ORDER = [
     "SUB2API_OAUTH_GROUP_IDS",
     "SUB2API_OAUTH_GROUP_NAME",
     "SUB2API_OAUTH_ACCOUNT_CONCURRENCY",
+    "SUB2API_WEB_PORT",
+    "SUB2API_WEB_HOST",
+    "SUB2API_WEB_SECRET",
     "ACC_MOTHER_ACCOUNT_EMAIL",
     "CHATGPT_RANDOM_EMAIL_DOMAIN",
 ]
@@ -36,6 +40,7 @@ DEFAULT_ENV_VALUES: dict[str, str] = {
     "SUB2API_ADMIN_API_KEY": "",
     "SUB2API_GROUP_IDS": "",
     "SUB2API_PROXY_ID": "",
+    "SUB2API_OUTBOUND_PROXY_URL": "",
     "SUB2API_IMPORT_CONCURRENCY": "50",
     "SUB2API_IMPORT_PRIORITY": "",
     "SUB2API_UPDATE_EXISTING": "true",
@@ -48,6 +53,9 @@ DEFAULT_ENV_VALUES: dict[str, str] = {
     "SUB2API_OAUTH_GROUP_IDS": "",
     "SUB2API_OAUTH_GROUP_NAME": "cc",
     "SUB2API_OAUTH_ACCOUNT_CONCURRENCY": "10",
+    "SUB2API_WEB_PORT": "28463",
+    "SUB2API_WEB_HOST": "0.0.0.0",
+    "SUB2API_WEB_SECRET": "",
     "ACC_MOTHER_ACCOUNT_EMAIL": "",
     "CHATGPT_RANDOM_EMAIL_DOMAIN": "example.com",
 }
@@ -148,7 +156,7 @@ def write_env_file(path: Path, values: dict[str, str]) -> None:
         "",
         "# 远程 Sub2API 管理配置",
     ]
-    for key in ENV_FIELD_ORDER[:9]:
+    for key in ENV_FIELD_ORDER[:10]:
         lines.append(f"{key}={json.dumps(merged[key], ensure_ascii=False)}")
 
     lines.extend(
@@ -157,7 +165,7 @@ def write_env_file(path: Path, values: dict[str, str]) -> None:
             "# OAuth 建号默认配置",
         ]
     )
-    for key in ENV_FIELD_ORDER[9:16]:
+    for key in ENV_FIELD_ORDER[10:17]:
         lines.append(f"{key}={json.dumps(merged[key], ensure_ascii=False)}")
 
     lines.extend(
@@ -166,7 +174,7 @@ def write_env_file(path: Path, values: dict[str, str]) -> None:
             "# 其他本地配置",
         ]
     )
-    for key in ENV_FIELD_ORDER[16:]:
+    for key in ENV_FIELD_ORDER[17:]:
         lines.append(f"{key}={json.dumps(merged[key], ensure_ascii=False)}")
 
     lines.append("")
@@ -233,28 +241,19 @@ def apply_env_values_to_process(values: dict[str, str]) -> None:
 class FirstRunSetupDialog:
     """首次启动配置向导。"""
 
-    def __init__(
-        self,
-        root: tk.Tk,
-        env_path: Path,
-        initial_values: dict[str, str],
-        *,
-        use_root_window: bool = False,
-    ) -> None:
+    def __init__(self, root: tk.Tk, env_path: Path, initial_values: dict[str, str]) -> None:
         self.root = root
         self.env_path = env_path
-        self.use_root_window = use_root_window
         self.result: dict[str, str] | None = None
         merged_values = dict(DEFAULT_ENV_VALUES)
         merged_values.update(initial_values or {})
 
-        self.window = root if use_root_window else tk.Toplevel(root)
+        self.window = tk.Toplevel(root)
         self.window.title("首次启动配置")
         self.window.geometry("760x520")
         self.window.minsize(680, 460)
-        if not use_root_window:
-            self.window.transient(root)
-            self.window.grab_set()
+        self.window.transient(root)
+        self.window.grab_set()
         self.window.protocol("WM_DELETE_WINDOW", self.handle_skip)
         center_window(self.window, preferred_width=760, preferred_height=520)
         bring_window_to_front(self.window)
@@ -283,6 +282,9 @@ class FirstRunSetupDialog:
         self.import_concurrency_var = tk.StringVar(
             value=merged_values["SUB2API_IMPORT_CONCURRENCY"]
         )
+        self.outbound_proxy_var = tk.StringVar(
+            value=merged_values["SUB2API_OUTBOUND_PROXY_URL"]
+        )
         self.oauth_concurrency_var = tk.StringVar(
             value=merged_values["SUB2API_OAUTH_ACCOUNT_CONCURRENCY"]
         )
@@ -301,12 +303,13 @@ class FirstRunSetupDialog:
         self._create_entry(container, 3, "管理员 API Key", self.admin_api_key_var, show="*")
         self._create_entry(container, 4, "默认分组名", self.group_name_var)
         self._create_entry(container, 5, "默认分组 ID", self.group_ids_var)
-        self._create_entry(container, 6, "转换并发", self.import_concurrency_var)
-        self._create_entry(container, 7, "建号并发", self.oauth_concurrency_var)
-        self._create_entry(container, 8, "OAuth 回调地址", self.redirect_uri_var)
-        self._create_entry(container, 9, "随机邮箱域名", self.random_domain_var)
-        self._create_entry(container, 10, "母号邮箱", self.mother_email_var)
-        self._create_entry(container, 11, "默认代理名", self.proxy_name_var)
+        self._create_entry(container, 6, "SOCKS5出站代理", self.outbound_proxy_var)
+        self._create_entry(container, 7, "转换并发", self.import_concurrency_var)
+        self._create_entry(container, 8, "建号并发", self.oauth_concurrency_var)
+        self._create_entry(container, 9, "OAuth 回调地址", self.redirect_uri_var)
+        self._create_entry(container, 10, "随机邮箱域名", self.random_domain_var)
+        self._create_entry(container, 11, "母号邮箱", self.mother_email_var)
+        self._create_entry(container, 12, "默认代理名", self.proxy_name_var)
 
         self.status_var = tk.StringVar(
             value=f"配置文件位置：{self.env_path}"
@@ -317,10 +320,10 @@ class FirstRunSetupDialog:
             foreground="#1d4ed8",
             justify="left",
             wraplength=700,
-        ).grid(row=12, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ).grid(row=13, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
         button_row = ttk.Frame(container)
-        button_row.grid(row=13, column=0, columnspan=2, sticky="e", pady=(16, 0))
+        button_row.grid(row=14, column=0, columnspan=2, sticky="e", pady=(16, 0))
         ttk.Button(button_row, text="先跳过", command=self.handle_skip).pack(
             side="left", padx=(0, 8)
         )
@@ -357,6 +360,7 @@ class FirstRunSetupDialog:
             "SUB2API_ADMIN_API_KEY": self.admin_api_key_var.get().strip(),
             "SUB2API_GROUP_IDS": self.group_ids_var.get().strip(),
             "SUB2API_PROXY_ID": "",
+            "SUB2API_OUTBOUND_PROXY_URL": self.outbound_proxy_var.get().strip(),
             "SUB2API_IMPORT_CONCURRENCY": self.import_concurrency_var.get().strip() or "50",
             "SUB2API_IMPORT_PRIORITY": "",
             "SUB2API_UPDATE_EXISTING": "true",
@@ -371,6 +375,9 @@ class FirstRunSetupDialog:
             "SUB2API_OAUTH_GROUP_NAME": self.group_name_var.get().strip() or "cc",
             "SUB2API_OAUTH_ACCOUNT_CONCURRENCY": self.oauth_concurrency_var.get().strip()
             or "10",
+            "SUB2API_WEB_PORT": "28463",
+            "SUB2API_WEB_HOST": "0.0.0.0",
+            "SUB2API_WEB_SECRET": "",
             "ACC_MOTHER_ACCOUNT_EMAIL": self.mother_email_var.get().strip(),
             "CHATGPT_RANDOM_EMAIL_DOMAIN": self.random_domain_var.get().strip()
             or "example.com",
@@ -413,6 +420,8 @@ def prepare_first_run_environment(module_file: str | Path) -> dict[str, str]:
         return values
 
     root = tk.Tk()
-    dialog = FirstRunSetupDialog(root, env_path, values, use_root_window=True)
+    root.withdraw()
+    dialog = FirstRunSetupDialog(root, env_path, values)
     result = dialog.show()
+    root.destroy()
     return result

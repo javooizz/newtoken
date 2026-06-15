@@ -283,11 +283,12 @@ def extract_snapshot_from_account_item(account_item: dict[str, Any]) -> Sub2APIU
     )
 
 
-def load_available_remote_config():
-    """从独立工具目录或项目根目录读取可用的 Sub2API 远程配置。"""
+def load_available_remote_config(env_path: str | Path | None = None):
+    """从指定 .env、独立工具目录或项目根目录读取可用的 Sub2API 远程配置。"""
 
-    for env_path in (LOCAL_ENV_PATH, PROJECT_ENV_PATH):
-        remote_defaults = load_remote_import_defaults(str(env_path))
+    candidate_paths = [Path(env_path)] if env_path else [LOCAL_ENV_PATH, PROJECT_ENV_PATH]
+    for candidate_path in candidate_paths:
+        remote_defaults = load_remote_import_defaults(str(candidate_path))
         if not remote_defaults.get("base_url") or not remote_defaults.get("admin_api_key"):
             continue
         return (
@@ -306,7 +307,7 @@ def load_available_remote_config():
                     "confirm_mixed_channel_risk", False
                 ),
             ),
-            str(env_path),
+            str(candidate_path),
         )
     raise RuntimeError(
         "未检测到 Sub2API 配置，请先在项目根目录 .env 或当前目录 .env 填写 "
@@ -314,10 +315,10 @@ def load_available_remote_config():
     )
 
 
-def load_sub2api_usage_lookup() -> Sub2APIUsageLoadResult:
+def load_sub2api_usage_lookup(env_path: str | Path | None = None) -> Sub2APIUsageLoadResult:
     """读取远程 OpenAI OAuth 账号额度，并按邮箱建立索引。"""
 
-    remote_config, config_path = load_available_remote_config()
+    remote_config, config_path = load_available_remote_config(env_path)
     account_items = fetch_remote_account_list(remote_config)
     lookup: dict[str, Sub2APIUsageSnapshot] = {}
     for account_item in account_items:
@@ -333,10 +334,12 @@ def load_sub2api_usage_lookup() -> Sub2APIUsageLoadResult:
     )
 
 
-def load_remote_account_summaries() -> list[Sub2APIRemoteAccountSummary]:
+def load_remote_account_summaries(
+    env_path: str | Path | None = None,
+) -> list[Sub2APIRemoteAccountSummary]:
     """读取远程账号摘要列表。"""
 
-    remote_config, _config_path = load_available_remote_config()
+    remote_config, _config_path = load_available_remote_config(env_path)
     account_items = fetch_remote_account_list(remote_config)
     return load_remote_account_summaries_from_items(account_items)
 
@@ -360,6 +363,7 @@ def load_remote_account_summaries_from_items(
 def set_remote_accounts_status(
     account_ids: list[int] | tuple[int, ...],
     status: str,
+    env_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """批量设置远程账号状态。"""
 
@@ -373,7 +377,7 @@ def set_remote_accounts_status(
             "results": [],
             "skipped": True,
         }
-    remote_config, _config_path = load_available_remote_config()
+    remote_config, _config_path = load_available_remote_config(env_path)
     return bulk_update_remote_accounts(
         remote_config,
         {
@@ -385,10 +389,11 @@ def set_remote_accounts_status(
 
 def set_remote_accounts_inactive(
     account_ids: list[int] | tuple[int, ...],
+    env_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """把远程账号批量停用为 inactive。"""
 
-    return set_remote_accounts_status(account_ids, "inactive")
+    return set_remote_accounts_status(account_ids, "inactive", env_path=env_path)
 
 
 def refresh_remote_accounts(

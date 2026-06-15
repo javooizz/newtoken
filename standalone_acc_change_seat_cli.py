@@ -16,7 +16,9 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
-from urllib import error, parse, request
+from urllib import error, parse
+
+from sub2api_http_client import http_request_text
 
 CLIENT_BUILD_NUMBER = "7295677"
 CLIENT_VERSION = "prod-6fad808b4f8e564864e3be9a01e210e4d978ffac"
@@ -33,9 +35,12 @@ DEFAULT_TRANSPORT_RETRY_COUNT = 3
 DEFAULT_TRANSPORT_RETRY_DELAY_SECONDS = 0.5
 DEFAULT_INVITE_ROLE = "standard-user"
 DEFAULT_INVITE_SEAT_TYPE = "usage_based"
+CHATGPT_SEAT_TYPE = "default"
+CODEX_SEAT_TYPE = "usage_based"
+CHATGPT_SEAT_LIMIT = 2
 SEAT_LABELS = {
-    "default": "ChatGPT",
-    "usage_based": "Codex",
+    CHATGPT_SEAT_TYPE: "ChatGPT",
+    CODEX_SEAT_TYPE: "Codex",
     "null": "ChatGPT",
 }
 
@@ -214,15 +219,19 @@ def request_json_with_retry(
     last_error: BaseException | None = None
 
     for attempt in range(1, max_attempts + 1):
-        req = request.Request(url=url, headers=request_headers, data=body, method=method)
         try:
-            with request.urlopen(req) as response:
-                raw_text = response.read().decode("utf-8")
-                return decode_json_response(raw_text)
-        except error.HTTPError as exc:
-            raw_text = exc.read().decode("utf-8", errors="replace")
-            raise SeatApiError(extract_error_message(exc.code, exc.reason, raw_text)) from exc
-        except TRANSIENT_NETWORK_EXCEPTIONS as exc:
+            status_code, reason, raw_text, _headers = http_request_text(
+                url,
+                method=method,
+                headers=request_headers,
+                body=body,
+            )
+            if status_code < 200 or status_code >= 300:
+                raise SeatApiError(extract_error_message(status_code, reason, raw_text))
+            return decode_json_response(raw_text)
+        except SeatApiError:
+            raise
+        except TRANSIENT_NETWORK_EXCEPTIONS + (RuntimeError,) as exc:
             last_error = exc
             if attempt >= max_attempts:
                 break
@@ -250,7 +259,78 @@ def extract_error_message(status_code: int, reason: str, raw_text: str) -> str:
 
 def next_seat_type(current: str | None) -> str:
     """根据当前席位推导切换后的目标席位。"""
-    return "default" if current == "usage_based" else "usage_based"
+
+    return CODEX_SEAT_TYPE
+
+
+def is_chatgpt_seat_type(seat_type: str | None) -> bool:
+    """判断一个 seat_type 是否占用 ChatGPT 席位。"""
+
+    return str(seat_type or "").strip().lower() in {CHATGPT_SEAT_TYPE, "null"}
+
+
+def is_codex_seat_type(seat_type: str | None) -> bool:
+    """判断一个 seat_type 是否是 Codex。"""
+
+    return str(seat_type or "").strip().lower() == CODEX_SEAT_TYPE
+
+
+def count_chatgpt_seats(users: list[dict[str, Any]]) -> int:
+    """统计当前成员列表中 ChatGPT 席位数量。"""
+
+    return sum(1 for user in users if is_chatgpt_seat_type(user.get("seat_type")))
+
+
+def select_chatgpt_overflow_users(
+    users: list[dict[str, Any]],
+    *,
+    limit: int = CHATGPT_SEAT_LIMIT,
+) -> list[dict[str, Any]]:
+    """找出超过上限后必须降为 Codex 的 ChatGPT 成员。"""
+
+    chatgpt_users = [
+        user
+        for user in users
+        if is_chatgpt_seat_type(user.get("seat_type"))
+    ]
+    if len(chatgpt_users) <= limit:
+        return []
+    return chatgpt_users[limit:]
+
+
+def enforce_chatgpt_seat_limit(
+    client: SeatClient,
+    *,
+    users: list[dict[str, Any]] | None = None,
+    limit: int = CHATGPT_SEAT_LIMIT,
+) -> dict[str, Any]:
+    """把现有成员强制收敛到 ChatGPT 席位不超过 limit。"""
+
+    current_users = list(users) if users is not None else list_all_users(client)
+    overflow_users = select_chatgpt_overflow_users(current_users, limit=limit)
+    changed_users: list[dict[str, Any]] = []
+    for user in overflow_users:
+        result = ensure_user_seat(
+            client,
+            user_id=str(user.get("id", "")),
+            email=None,
+            target_seat_type=CODEX_SEAT_TYPE,
+        )
+        changed_users.append(
+            {
+                "email": user.get("email") or "",
+                "user_id": user.get("id") or "",
+                "seat_result": result,
+            }
+        )
+    refreshed_users = list_all_users(client)
+    return {
+        "limit": int(limit),
+        "overflow_count": len(overflow_users),
+        "changed_users": changed_users,
+        "users": refreshed_users,
+        "chatgpt_count": count_chatgpt_seats(refreshed_users),
+    }
 
 
 def seat_label(seat_type: str | None) -> str:
@@ -402,6 +482,45 @@ def find_user(client: SeatClient, user_id: str | None, email: str | None) -> dic
     raise SeatApiError("必须提供 --user-id 或 --email。")
 
 
+def list_all_users(client: SeatClient, query: str = "") -> list[dict[str, Any]]:
+    """拉取完整成员列表，用于底层席位策略校验。"""
+
+    users: list[dict[str, Any]] = []
+    page = 0
+    limit = 100
+    while True:
+        result = client.list_users(page=page, limit=limit, query=query)
+        items = list(result.get("items") or [])
+        users.extend(items)
+        total = int(result.get("total", len(users)) or len(users))
+        if not items or len(users) >= total:
+            break
+        page += 1
+    return users
+
+
+def enforce_seat_architecture_policy(
+    *,
+    users: list[dict[str, Any]],
+    target_user: dict[str, Any],
+    target_seat_type: str,
+) -> None:
+    """底层席位策略：Codex 不升 ChatGPT，ChatGPT 总数不超过 2。"""
+
+    current_seat_type = str(target_user.get("seat_type") or "")
+    if target_seat_type != CHATGPT_SEAT_TYPE:
+        return
+    if is_codex_seat_type(current_seat_type):
+        raise SeatApiError("底层策略已禁止 Codex 席位改回 ChatGPT。")
+    if is_chatgpt_seat_type(current_seat_type):
+        return
+    current_chatgpt_count = count_chatgpt_seats(users)
+    if current_chatgpt_count >= CHATGPT_SEAT_LIMIT:
+        raise SeatApiError(
+            f"底层策略限制 ChatGPT 席位最多 {CHATGPT_SEAT_LIMIT} 个，当前已达上限。"
+        )
+
+
 def ensure_user_seat(
     client: SeatClient,
     user_id: str | None,
@@ -411,7 +530,16 @@ def ensure_user_seat(
     progress_callback: Callable[[int, str, str], None] | None = None,
 ) -> dict[str, Any]:
     """确保目标用户最终处于指定席位，必要时自动重试。"""
-    user = find_user(client, user_id=user_id, email=email)
+    if target_seat_type == CHATGPT_SEAT_TYPE:
+        users = list_all_users(client)
+        user = resolve_target_user(users, user_id, email)
+        enforce_seat_architecture_policy(
+            users=users,
+            target_user=user,
+            target_seat_type=target_seat_type,
+        )
+    else:
+        user = find_user(client, user_id=user_id, email=email)
     current_seat_type = str(user.get("seat_type") or "")
     identifier = str(user.get("email") or user.get("id") or "")
 
@@ -562,7 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--limit", type=int, default=DEFAULT_PAGE_SIZE, help="每页条数")
     list_parser.add_argument("--query", default="", help="可选搜索关键字")
 
-    toggle_parser = subparsers.add_parser("toggle", help="在 ChatGPT 和 Codex 之间切换席位")
+    toggle_parser = subparsers.add_parser("toggle", help="按策略把目标成员改为 Codex")
     add_common_auth_arguments(toggle_parser)
     toggle_parser.add_argument("--user-id", help="目标用户 ID")
     toggle_parser.add_argument("--email", help="目标用户邮箱")
@@ -575,7 +703,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--seat-type",
         choices=("default", "usage_based"),
         required=True,
-        help="default=ChatGPT，usage_based=Codex",
+        help="usage_based=Codex；default 会被底层策略严格限制",
     )
     return parser
 

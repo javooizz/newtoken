@@ -10,9 +10,11 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib import error, request
+from urllib import error
 
 from sub2api_runtime import is_frozen_app
+from sub2api_http_client import download_file as proxied_download_file
+from sub2api_http_client import http_request_text
 
 DEFAULT_GITHUB_REPO = "DZenner/newtoken"
 DEFAULT_EXE_ASSET_NAME = "Sub2API独立工具.exe"
@@ -86,9 +88,15 @@ def _build_request_headers() -> dict[str, str]:
 def _http_get_json(url: str, timeout: int = 15) -> dict[str, Any] | list[Any]:
     """执行 HTTP GET 并解析 JSON。"""
 
-    req = request.Request(url, headers=_build_request_headers())
-    with request.urlopen(req, timeout=timeout) as response:
-        raw_body = response.read().decode("utf-8")
+    status_code, reason, raw_body, _headers = http_request_text(
+        url,
+        headers=_build_request_headers(),
+        timeout=timeout,
+    )
+    if status_code == 404:
+        raise error.HTTPError(url, 404, reason, {}, None)
+    if status_code < 200 or status_code >= 300:
+        raise RuntimeError(f"GitHub 请求失败 HTTP {status_code} {reason}: {raw_body[:500]}")
     return json.loads(raw_body)
 
 
@@ -331,13 +339,7 @@ def build_update_script_path(current_exe_path: str | Path) -> Path:
 def download_file(url: str, target_path: str | Path, timeout: int = 120) -> Path:
     """把远端文件下载到本地。"""
 
-    req = request.Request(url, headers=_build_request_headers())
-    target = Path(target_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with request.urlopen(req, timeout=timeout) as response:
-        data = response.read()
-    target.write_bytes(data)
-    return target
+    return proxied_download_file(url, target_path, timeout=timeout)
 
 
 def build_windows_replace_script_text(

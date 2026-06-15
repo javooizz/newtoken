@@ -5,10 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import ssl
 import sys
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +14,7 @@ if str(LOCAL_PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_PROJECT_DIR))
 
 from sub2api_runtime import get_app_dir  # noqa: E402
+from sub2api_http_client import http_request_text  # noqa: E402
 
 CHATGPT_API_BASE = "https://chatgpt.com/backend-api"
 DEFAULT_SESSION_CACHE_FILE = ".chatgpt_session.json"
@@ -172,21 +170,22 @@ def _request_json(
 ) -> dict:
     """调用 GPT 团队接口并解析 JSON。"""
 
-    ctx = ssl.create_default_context()
     request_body = None
     if body is not None:
         request_body = json.dumps(body).encode("utf-8")
-    req = urllib.request.Request(url, data=request_body, method=method)
-    for key, value in _build_headers(session, extra_headers).items():
-        req.add_header(key, value)
+    headers = _build_headers(session, extra_headers)
     if request_body is not None:
-        req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8", errors="replace"))
-    except urllib.error.HTTPError as exc:
-        body_text = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"HTTP {exc.code}: {body_text[:500]}") from exc
+        headers["Content-Type"] = "application/json"
+    status_code, reason, body_text, _response_headers = http_request_text(
+        url,
+        method=method,
+        headers=headers,
+        body=request_body,
+        timeout=30,
+    )
+    if status_code < 200 or status_code >= 300:
+        raise RuntimeError(f"HTTP {status_code} {reason}: {body_text[:500]}")
+    return json.loads(body_text)
 
 
 def fetch_team_members(session: HarSession) -> list[dict]:

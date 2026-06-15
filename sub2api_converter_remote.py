@@ -853,9 +853,13 @@ def merge_remote_accounts(list_items, export_accounts):
 def scan_remote_accounts(config):
     """拉取远程账号并按现有额度校验逻辑统计活号、死号和平均额度。"""
 
-    token_usage_summary = fetch_remote_token_usage_summary(config)
-    list_items = fetch_remote_account_list(config)
-    export_accounts = fetch_remote_account_export_data(config)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        token_future = executor.submit(fetch_remote_token_usage_summary, config)
+        list_future = executor.submit(fetch_remote_account_list, config)
+        export_future = executor.submit(fetch_remote_account_export_data, config)
+        token_usage_summary = token_future.result()
+        list_items = list_future.result()
+        export_accounts = export_future.result()
     remote_entries, unmatched_names = merge_remote_accounts(list_items, export_accounts)
     candidates = [
         AccountCandidate(
@@ -870,8 +874,13 @@ def scan_remote_accounts(config):
     results = []
     dead_items = []
     no_quota_items = []
+    validate_workers = min(
+        max(1, int(config.concurrency or DEFAULT_OPENAI_IMPORT_CONCURRENCY)),
+        DEFAULT_OPENAI_IMPORT_CONCURRENCY,
+        max(1, len(candidates)),
+    )
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=DEFAULT_OPENAI_IMPORT_CONCURRENCY
+        max_workers=validate_workers
     ) as executor:
         future_map = {
             executor.submit(validate_account_candidate, candidate): entry
@@ -907,6 +916,7 @@ def scan_remote_accounts(config):
         "last_hour_tokens": token_usage_summary.get("last_hour_tokens"),
         "previous_hour_tokens": token_usage_summary.get("previous_hour_tokens"),
         "token_stats_error": token_usage_summary.get("token_stats_error", ""),
+        "validate_concurrency": validate_workers,
         "dead_items": sorted(dead_items, key=lambda item: item["name"].lower()),
         "no_quota_items": sorted(
             no_quota_items, key=lambda item: item["name"].lower()
@@ -976,47 +986,56 @@ def set_all_remote_openai_account_privacy(config):
 
     account_items = fetch_remote_account_list(config)
     results = []
-    for order, account_item in enumerate(account_items, start=1):
+    privacy_workers = min(
+        max(1, int(config.concurrency or REMOTE_DELETE_CONCURRENCY)),
+        DEFAULT_OPENAI_IMPORT_CONCURRENCY,
+        max(1, len(account_items)),
+    )
+
+    def run_one(order_and_item):
+        order, account_item = order_and_item
         account_id = int(account_item.get("id", 0) or 0)
         name = str(account_item.get("name", "")).strip() or f"remote-{order}"
         if account_id <= 0:
-            results.append(
-                {
-                    "account_id": account_id,
-                    "name": name,
-                    "success": False,
-                    "privacy_mode": "",
-                    "error": "远程账号缺少有效 id",
-                }
-            )
-            continue
+            return {
+                "account_id": account_id,
+                "name": name,
+                "success": False,
+                "privacy_mode": "",
+                "error": "远程账号缺少有效 id",
+            }
         try:
             privacy_result = set_remote_account_privacy(config, account_id, name)
-            results.append(
-                {
-                    "account_id": account_id,
-                    "name": name,
-                    "success": True,
-                    "privacy_mode": privacy_result.get("privacy_mode", ""),
-                    "error": "",
-                }
-            )
+            return {
+                "account_id": account_id,
+                "name": name,
+                "success": True,
+                "privacy_mode": privacy_result.get("privacy_mode", ""),
+                "error": "",
+            }
         except Exception as exc:  # noqa: BLE001
-            results.append(
-                {
-                    "account_id": account_id,
-                    "name": name,
-                    "success": False,
-                    "privacy_mode": "",
-                    "error": str(exc),
-                }
-            )
+            return {
+                "account_id": account_id,
+                "name": name,
+                "success": False,
+                "privacy_mode": "",
+                "error": str(exc),
+            }
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=privacy_workers) as executor:
+        futures = [
+            executor.submit(run_one, order_and_item)
+            for order_and_item in enumerate(account_items, start=1)
+        ]
+        for future in concurrent.futures.as_completed(futures):
+            results.append(future.result())
     success = sum(1 for item in results if item["success"])
     failed = len(results) - success
     return {
         "total": len(results),
         "success": success,
         "failed": failed,
+        "concurrency": privacy_workers,
         "items": results,
     }
 
