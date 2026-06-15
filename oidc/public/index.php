@@ -285,14 +285,12 @@ if ($path === '/login') {
 }
 
 if ($path === '/sso') {
+    $pending = app_oidc_pending_authorize();
+    $hasPending = $pending !== null;
+    $allowedDomains = ($hasPending && !empty($pending['allowed_domains'])) ? array_values((array) $pending['allowed_domains']) : [];
     $hintEmail = app_login_hint_email();
     list($hintPrefix, $hintDomain) = app_split_email_parts($hintEmail);
-    $allowedDomains = (array) app_config('allowed_email_domains', []);
     $userRateBucket = 'user_login_' . app_ip();
-
-    if ($hintDomain && !in_array($hintDomain, $allowedDomains, true)) {
-        app_render_page('SSO 登录错误', '<section class="hero"><h1>邮箱后缀不受支持</h1><p>OpenAI 传来的邮箱后缀不在当前系统的受控范围内。请在后台添加允许的后缀，或使用受控邮箱重新发起登录。</p></section>', ['status' => 400]);
-    }
 
     if (app_is_post()) {
         if (!app_validate_csrf_token('user_login', app_post('csrf_token'))) {
@@ -306,11 +304,18 @@ if ($path === '/sso') {
 
         $plainCard = app_normalize_card_value(app_post('card_key'));
         $fullName = app_post('full_name');
-        try {
-            $loginEmail = app_build_login_email_from_request();
-        } catch (Exception $e) {
+        $emailPrefix = strtolower(trim((string) app_post('email_prefix')));
+        $emailDomainInput = strtolower(trim((string) app_post('email_domain')));
+        $loginEmail = $emailPrefix . '@' . $emailDomainInput;
+
+        if ($emailPrefix === '' || $emailDomainInput === '' || !filter_var($loginEmail, FILTER_VALIDATE_EMAIL)) {
             app_rate_limit_record($userRateBucket, 300);
-            app_flash_set('error', $e->getMessage());
+            app_flash_set('error', '邮箱前缀和后缀不能为空，且需合法。');
+            app_redirect('/sso');
+        }
+        if ($hintEmail !== '' && !hash_equals(strtolower($hintEmail), strtolower($loginEmail))) {
+            app_rate_limit_record($userRateBucket, 300);
+            app_flash_set('error', '邮箱必须与 OpenAI 登录时输入的邮箱一致。');
             app_redirect('/sso');
         }
 
@@ -325,10 +330,15 @@ if ($path === '/sso') {
         }
 
         $user = app_user_for_card($card);
-        if ($user && $user['status'] === 'active') {
+        if ($user) {
             if (!hash_equals(strtolower($user['email']), strtolower($loginEmail))) {
                 app_rate_limit_record($userRateBucket, 300);
-                app_flash_set('error', '邮箱前缀与这张卡绑定的账号不一致。');
+                app_flash_set('error', '邮箱与这张卡绑定的账号不一致。');
+                app_redirect('/sso');
+            }
+            if ($user['status'] !== 'active') {
+                app_rate_limit_record($userRateBucket, 300);
+                app_flash_set('error', '这张卡绑定的账号已被禁用。');
                 app_redirect('/sso');
             }
             app_touch_user_login($user['id']);
@@ -340,14 +350,15 @@ if ($path === '/sso') {
             app_redirect($redirect);
         }
 
-        if ($user && $user['status'] !== 'active') {
+        // 卡未绑定 → 首次激活，必须有 pending client 上下文（审查档 2）
+        if (!$hasPending) {
             app_rate_limit_record($userRateBucket, 300);
-            app_flash_set('error', '这张卡绑定的账号已被禁用。');
+            app_flash_set('error', '这张卡尚未激活，请从 ChatGPT 发起登录以完成首次绑定。');
             app_redirect('/sso');
         }
-
         try {
-            $user = app_activate_user($plainCard, $loginEmail, $fullName);
+            $originClientId = isset($pending['client_id']) ? (string) $pending['client_id'] : null;
+            $user = app_activate_user($plainCard, $loginEmail, $fullName, $allowedDomains, $originClientId);
         } catch (Exception $e) {
             app_rate_limit_record($userRateBucket, 300);
             app_flash_set('error', $e->getMessage());
@@ -363,18 +374,23 @@ if ($path === '/sso') {
         app_redirect($redirect);
     }
 
-    $suffixField = '';
-    if ($hintDomain && in_array($hintDomain, $allowedDomains, true)) {
-        $suffixField = '<div class="field"><label>邮箱后缀</label><input type="text" value="' . app_h($hintDomain) . '" readonly><input type="hidden" name="email_domain" value="' . app_h($hintDomain) . '"></div>';
-    } else {
-        $options = '';
-        foreach ($allowedDomains as $domain) {
-            $options .= '<option value="' . app_h($domain) . '">' . app_h($domain) . '</option>';
+    if ($hasPending && !empty($allowedDomains)) {
+        if ($hintDomain && in_array(app_normalize_domain($hintDomain), $allowedDomains, true)) {
+            $suffixField = '<div class="field"><label>邮箱后缀</label><input type="text" value="' . app_h($hintDomain) . '" readonly><input type="hidden" name="email_domain" value="' . app_h($hintDomain) . '"></div>';
+        } else {
+            $options = '';
+            foreach ($allowedDomains as $domain) {
+                $options .= '<option value="' . app_h($domain) . '">' . app_h($domain) . '</option>';
+            }
+            $suffixField = '<div class="field"><label>邮箱后缀</label><select name="email_domain" required>' . $options . '</select></div>';
         }
-        $suffixField = '<div class="field"><label>邮箱后缀</label><select name="email_domain" required>' . $options . '</select></div>';
+        $intro = '用户先在 ChatGPT 里输入完整受控邮箱，OpenAI 跳转到这里后，再输入卡密和邮箱前缀即可。新卡会在第一次使用时自动绑定。';
+    } else {
+        $suffixField = '<div class="field"><label>邮箱后缀</label><input type="text" name="email_domain" placeholder="example.com" required></div>';
+        $intro = '直接访问只能用<strong>已激活</strong>的卡密登录。新卡首次绑定请从 ChatGPT 发起。';
     }
     $prefixValue = $hintPrefix ? ' value="' . app_h($hintPrefix) . '"' : '';
-    $body = '<section class="hero"><span class="pill">单页 SSO 卡密登录</span><h1>使用卡密和邮箱前缀登录</h1><p>用户先在 ChatGPT 里输入完整受控邮箱，OpenAI 跳转到这里后，再输入卡密和邮箱前缀即可。如果是新卡，系统会在第一次使用时自动完成绑定。</p></section><section class="split"><div class="card"><div class="section-title"><h3>SSO 卡密登录</h3></div><form method="post" class="stack"><input type="hidden" name="csrf_token" value="' . app_h(app_issue_csrf_token('user_login')) . '"><div class="form-grid"><div class="field"><label>邮箱前缀</label><input type="text" name="email_prefix"' . $prefixValue . ' required></div>' . $suffixField . '</div><div class="field"><label>卡密</label><input class="mono" type="text" name="card_key" required></div><div class="field"><label>显示名（可选）</label><input type="text" name="full_name"></div><div class="actions"><button type="submit">继续</button></div></form></div><div class="card"><div class="section-title"><h3>接下来会发生什么</h3></div><div class="steps"><div class="step"><div>如果卡密已经绑定，邮箱前缀必须与绑定账号一致。</div></div><div class="step"><div>如果是新卡，系统会立即绑定到当前输入的邮箱。</div></div><div class="step"><div>如果这次登录是从 OpenAI 发起的，系统会自动继续走 OIDC 回跳。</div></div></div></div></section>';
+    $body = '<section class="hero"><span class="pill">单页 SSO 卡密登录</span><h1>使用卡密和邮箱前缀登录</h1><p>' . $intro . '</p></section><section class="split"><div class="card"><div class="section-title"><h3>SSO 卡密登录</h3></div><form method="post" class="stack"><input type="hidden" name="csrf_token" value="' . app_h(app_issue_csrf_token('user_login')) . '"><div class="form-grid"><div class="field"><label>邮箱前缀</label><input type="text" name="email_prefix"' . $prefixValue . ' required></div>' . $suffixField . '</div><div class="field"><label>卡密</label><input class="mono" type="text" name="card_key" required></div><div class="field"><label>显示名（可选）</label><input type="text" name="full_name"></div><div class="actions"><button type="submit">继续</button></div></form></div><div class="card"><div class="section-title"><h3>接下来会发生什么</h3></div><div class="steps"><div class="step"><div>如果卡密已经绑定，邮箱前缀必须与绑定账号一致。</div></div><div class="step"><div>如果是新卡，需从 ChatGPT 发起登录以完成首次绑定。</div></div><div class="step"><div>如果这次登录是从 OpenAI 发起的，系统会自动继续走 OIDC 回跳。</div></div></div></div></section>';
     app_render_page('SSO 卡密登录', $body);
 }
 

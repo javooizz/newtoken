@@ -10,7 +10,7 @@ function app_find_admin_by_username($username)
     return app_db_one('SELECT * FROM admins WHERE username = :username LIMIT 1', ['username' => $username]);
 }
 
-function app_activate_user($plainCard, $email, $fullName)
+function app_activate_user($plainCard, $email, $fullName, array $allowedDomains, ?string $originClientId)
 {
     $plainCard = app_normalize_card_value($plainCard);
     $email = strtolower(trim($email));
@@ -20,15 +20,16 @@ function app_activate_user($plainCard, $email, $fullName)
     if (!$card || !app_card_is_usable($card)) {
         throw new RuntimeException('卡密无效、已过期，或不可使用。');
     }
-
     if ($card['status'] !== 'unused' || !empty($card['used_by_user_id'])) {
         throw new RuntimeException('这张卡已经绑定到其他账号。');
     }
-
-    if (!app_allowed_email($email)) {
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new RuntimeException('邮箱格式不正确。');
+    }
+    $domain = app_normalize_domain(substr(strrchr($email, '@'), 1));
+    if (!in_array($domain, $allowedDomains, true)) {
         throw new RuntimeException('当前邮箱后缀不允许登录。');
     }
-
     if (app_find_user_by_email($email)) {
         throw new RuntimeException('这个邮箱已经存在绑定账号。');
     }
@@ -37,17 +38,15 @@ function app_activate_user($plainCard, $email, $fullName)
         $emailParts = explode('@', $email, 2);
         $fullName = $emailParts[0];
     }
-
     $nameParts = preg_split('/\s+/', $fullName);
     $givenName = isset($nameParts[0]) ? $nameParts[0] : $fullName;
     $familyName = count($nameParts) > 1 ? $nameParts[count($nameParts) - 1] : $givenName;
-    $domain = substr(strrchr($email, '@'), 1);
     $subject = 'usr_' . app_random_hex(16);
     $pdo = app_pdo();
     $pdo->beginTransaction();
 
     try {
-        app_db_exec('INSERT INTO users (oidc_subject, email, email_domain, full_name, given_name, family_name, password_hash, status, activated_by_card_id, activated_at, created_at, updated_at) VALUES (:oidc_subject, :email, :email_domain, :full_name, :given_name, :family_name, :password_hash, :status, :activated_by_card_id, :activated_at, :created_at, :updated_at)', [
+        app_db_exec('INSERT INTO users (oidc_subject, email, email_domain, full_name, given_name, family_name, password_hash, status, activated_by_card_id, activated_at, origin_client_id, created_at, updated_at) VALUES (:oidc_subject, :email, :email_domain, :full_name, :given_name, :family_name, :password_hash, :status, :activated_by_card_id, :activated_at, :origin_client_id, :created_at, :updated_at)', [
             'oidc_subject' => $subject,
             'email' => $email,
             'email_domain' => $domain,
@@ -58,6 +57,7 @@ function app_activate_user($plainCard, $email, $fullName)
             'status' => 'active',
             'activated_by_card_id' => (int) $card['id'],
             'activated_at' => app_now(),
+            'origin_client_id' => $originClientId,
             'created_at' => app_now(),
             'updated_at' => app_now(),
         ]);
@@ -79,7 +79,7 @@ function app_activate_user($plainCard, $email, $fullName)
     }
 
     $user = app_find_user_by_email($email);
-    app_audit('user', (int) $user['id'], 'user_activated', 'card', (string) $card['id'], ['email' => $email]);
+    app_audit('user', (int) $user['id'], 'user_activated', 'card', (string) $card['id'], ['email' => $email, 'origin_client_id' => $originClientId]);
 
     return $user;
 }
