@@ -434,7 +434,27 @@ def enforce_acc_low_quota_policy(state: WebState) -> dict[str, Any]:
     }
 
 
-def refresh_acc_usage(state: WebState) -> dict[str, Any]:
+def normalize_unknown_seats(state: WebState) -> dict[str, Any]:
+    """Force all non-Codex/non-ChatGPT seats to Codex in bulk."""
+    client = state.build_seat_client()
+    users = seat_core.list_all_users(client)
+    unknown = []
+    changed = []
+    for user in users:
+        seat = str(user.get("seat_type") or "")
+        if seat in ("default", "null", ""):
+            continue
+        if seat_core.is_codex_seat_type(seat):
+            continue
+        unknown.append({"id": user.get("id"), "email": user.get("email"), "seat_type": seat})
+        try:
+            seat_core.ensure_user_seat(client, str(user.get("id")), email=None,
+                                       target_seat_type=seat_core.CODEX_SEAT_TYPE)
+            changed.append({"email": user.get("email"), "from": seat, "to": "usage_based"})
+        except Exception:
+            pass
+    return {"unknown_count": len(unknown), "changed": len(changed), "items": changed}
+
     result = load_sub2api_usage_lookup(state.env_path)
     state.last_usage_lookup = dict(result.lookup)
     matched = 0
