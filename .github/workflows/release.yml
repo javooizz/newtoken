@@ -38,7 +38,7 @@ jobs:
       - name: Build Onefile EXE
         shell: pwsh
         run: |
-          python .\build_sub2api_standalone_exe.py --onefile
+          python .\tools\build_sub2api_standalone_exe.py --onefile
 
       - name: Resolve Release Tag
         id: release_tag

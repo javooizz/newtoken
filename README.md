@@ -18,9 +18,6 @@
 
 ```text
 entry.py                         # Linux/宝塔 WebUI 入口
-sub2api_webui.py                 # 旧 WebUI 入口兼容壳
-sub2api_standalone_tool.py       # 旧桌面入口兼容壳
-standalone_*.py / sub2api_*.py   # 少量旧命令兼容壳
 
 newtoken/
   common/                        # 运行时路径、HTTP、SOCKS5 代理
@@ -34,7 +31,7 @@ scripts/                         # Windows 启动脚本
 docs/                            # 后续文档扩展
 ```
 
-根目录保留兼容壳是为了不打断旧命令；新代码都在 `newtoken/` 包里维护。
+根目录只保留 `entry.py` 作为 Linux/WebUI 部署入口；业务代码都在 `newtoken/` 包里维护。
 
 ## Linux / 宝塔部署
 
@@ -108,14 +105,6 @@ Windows 打包桌面版：
 
 ```powershell
 py .\tools\build_sub2api_standalone_exe.py --onefile
-```
-
-旧命令仍可用：
-
-```powershell
-py .\sub2api_standalone_tool.py
-py .\standalone_acc_change_seat_cli.py --help
-py .\sub2api_converter.py
 ```
 
 ## 忽略文件

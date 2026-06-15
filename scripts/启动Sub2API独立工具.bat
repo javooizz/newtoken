@@ -6,19 +6,19 @@ cd ..
 set "CODEX_PYTHON=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
 
 if exist "%CODEX_PYTHON%" (
-    "%CODEX_PYTHON%" "%cd%\sub2api_standalone_tool.py"
+    "%CODEX_PYTHON%" -m newtoken.desktop.standalone_tool
     goto :end
 )
 
 where py >nul 2>nul
 if %errorlevel%==0 (
-    py "%cd%\sub2api_standalone_tool.py"
+    py -m newtoken.desktop.standalone_tool
     goto :end
 )
 
 where python >nul 2>nul
 if %errorlevel%==0 (
-    python "%cd%\sub2api_standalone_tool.py"
+    python -m newtoken.desktop.standalone_tool
     goto :end
 )
 
