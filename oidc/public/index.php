@@ -660,6 +660,7 @@ if ($path === '/authorize') {
                 'login_hint' => app_query('login_hint'),
             ];
             app_oidc_validate_authorize_request($params);
+            $params['allowed_domains'] = app_client_domains($params['client_id']);
             app_oidc_store_pending_authorize($params);
         }
     } catch (Exception $e) {
