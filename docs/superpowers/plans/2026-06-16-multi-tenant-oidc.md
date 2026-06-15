@@ -515,6 +515,9 @@ function app_client_create(array $in, ?int $adminId): array
     }
     $redirects = array_values(array_unique(array_filter(array_map('trim', (array) ($in['redirect_uris'] ?? [])))));
     $domainsRaw = array_values(array_unique(array_filter(array_map('trim', (array) ($in['allowed_domains'] ?? [])))));
+    if (empty($domainsRaw)) {
+        throw new RuntimeException('母号至少需要配置一个允许域名。');
+    }
 
     $clientId = 'cid_' . app_random_hex(16);
     $secretPlain = 'csk_' . app_random_hex(32);
@@ -582,28 +585,39 @@ function app_client_update(string $clientId, array $changes, ?int $adminId): voi
     if (!app_client_find($clientId)) {
         throw new RuntimeException('母号不存在。');
     }
-    $fields = [];
-    $params = ['cid' => $clientId, 'u' => app_now()];
-    if (isset($changes['name'])) {
-        $name = trim((string) $changes['name']);
-        if ($name === '') { throw new RuntimeException('母号名称不能为空。'); }
-        $fields[] = 'name = :name'; $params['name'] = $name;
-    }
-    if (isset($changes['redirect_uris'])) {
-        $ru = array_values(array_unique(array_filter(array_map('trim', (array) $changes['redirect_uris']))));
-        $fields[] = 'redirect_uris = :ru'; $params['ru'] = json_encode($ru);
-    }
-    if (isset($changes['status'])) {
-        $fields[] = 'status = :st'; $params['st'] = $changes['status'] === 'disabled' ? 'disabled' : 'active';
-    }
-    if ($fields) {
-        $fields[] = 'updated_at = :u';
-        app_db_exec('UPDATE oidc_clients SET ' . implode(', ', $fields) . ' WHERE client_id = :cid', $params);
-    }
-    if (isset($changes['allowed_domains'])) {
-        $raw = array_values(array_unique(array_filter(array_map('trim', (array) $changes['allowed_domains']))));
-        app_db_exec('DELETE FROM oidc_client_domains WHERE client_id = :cid', ['cid' => $clientId]);
-        app_client_add_domains($clientId, $raw);
+    $pdo = app_pdo();
+    $pdo->beginTransaction();
+    try {
+        $fields = [];
+        $params = ['cid' => $clientId, 'u' => app_now()];
+        if (isset($changes['name'])) {
+            $name = trim((string) $changes['name']);
+            if ($name === '') { throw new RuntimeException('母号名称不能为空。'); }
+            $fields[] = 'name = :name'; $params['name'] = $name;
+        }
+        if (isset($changes['redirect_uris'])) {
+            $ru = array_values(array_unique(array_filter(array_map('trim', (array) $changes['redirect_uris']))));
+            $fields[] = 'redirect_uris = :ru'; $params['ru'] = json_encode($ru);
+        }
+        if (isset($changes['status'])) {
+            $fields[] = 'status = :st'; $params['st'] = $changes['status'] === 'disabled' ? 'disabled' : 'active';
+        }
+        if ($fields) {
+            $fields[] = 'updated_at = :u';
+            app_db_exec('UPDATE oidc_clients SET ' . implode(', ', $fields) . ' WHERE client_id = :cid', $params);
+        }
+        if (isset($changes['allowed_domains'])) {
+            $raw = array_values(array_unique(array_filter(array_map('trim', (array) $changes['allowed_domains']))));
+            if (empty($raw)) {
+                throw new RuntimeException('母号至少需要配置一个允许域名。');
+            }
+            app_db_exec('DELETE FROM oidc_client_domains WHERE client_id = :cid', ['cid' => $clientId]);
+            app_client_add_domains($clientId, $raw);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw $e;
     }
     app_audit($adminId ? 'admin' : 'system', $adminId, 'client_updated', 'client', $clientId, array_keys($changes));
 }
@@ -667,6 +681,15 @@ try {
 } catch (Exception $e) {
     echo 'dup_rejected=' . $e->getMessage() . "\n";                    // 域名 a.example.com 已被母号「母号A」占用。
 }
+
+// update：域名整体替换（事务安全，不应清空）
+app_client_update($a['client_id'], ['allowed_domains' => ['a2.example.com']], null);
+echo 'updated_domains=' . json_encode(app_client_domains($a['client_id'])) . "\n";   // ["a2.example.com"]
+
+// rotate：旧 secret 失效、新 secret 生效
+$new = app_client_rotate_secret($a['client_id'], null);
+echo 'rotate_oldfail=' . var_export(app_client_authenticate($a['client_id'], $a['client_secret']), true) . "\n";  // false
+echo 'rotate_newok=' . var_export(app_client_authenticate($a['client_id'], $new), true) . "\n";                  // true
 ```
 
 - [ ] **Step 4: 运行验证**
@@ -1245,7 +1268,7 @@ function app_admin_clients_html(array $clients, $created, $revealed, string $csr
         $toggleLabel = $c['status'] === 'active' ? '停用' : '启用';
         $rows .= '<tr><td>' . app_h($c['name']) . '</td><td class="mono">' . app_h($c['client_id']) . '</td><td>' . app_h($domains) . '</td><td>' . app_h($statusLabel) . '</td><td>'
             . '<div class="actions">'
-            . '<form method="post" action="/admin/clients/reveal"><input type="hidden" name="csrf_token" value="' . app_h($csrf) . '"><input type="hidden" name="client_id" value="' . app_h($c['client_id']) . '"><button class="inline secondary" type="submit">显示 Secret</button></form>'
+            . '<form method="post" action="/admin/clients/reveal" onsubmit="return confirm(\'确认显示明文 Secret？此操作会写入审计日志。\')"><input type="hidden" name="csrf_token" value="' . app_h($csrf) . '"><input type="hidden" name="client_id" value="' . app_h($c['client_id']) . '"><button class="inline secondary" type="submit">显示 Secret</button></form>'
             . '<form method="post" action="/admin/clients/rotate" onsubmit="return confirm(\'确认轮换 Secret？旧值立即失效。\')"><input type="hidden" name="csrf_token" value="' . app_h($csrf) . '"><input type="hidden" name="client_id" value="' . app_h($c['client_id']) . '"><button class="inline warn" type="submit">轮换 Secret</button></form>'
             . '<form method="post" action="/admin/clients/status"><input type="hidden" name="csrf_token" value="' . app_h($csrf) . '"><input type="hidden" name="client_id" value="' . app_h($c['client_id']) . '"><input type="hidden" name="status" value="' . $toggle . '"><button class="inline secondary" type="submit">' . $toggleLabel . '</button></form>'
             . '</div>'
