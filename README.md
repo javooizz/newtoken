@@ -1,5 +1,5 @@
 # Sub2API 独立工具
-
+全部教程 在 https://app.notion.com/p/48-ChatGPT-Team-23-6-25-37f435e8d42d803f8a13dfea1c765c10
 只保留 `Sub2API + ACC 席位管理` 的单页工具公开版。
 
 ## 功能
