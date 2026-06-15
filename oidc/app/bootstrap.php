@@ -10,6 +10,7 @@ require_once __DIR__ . '/admin.php';
 require_once __DIR__ . '/oidc.php';
 require_once __DIR__ . '/api.php';
 require_once __DIR__ . '/views.php';
+require_once __DIR__ . '/clients.php';
 
 $configFile = __DIR__ . '/config.php';
 $sampleFile = __DIR__ . '/config.sample.php';
