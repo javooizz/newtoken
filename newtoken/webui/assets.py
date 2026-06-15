@@ -112,6 +112,7 @@ const actionNames = {
   delete_auth_error: '删除 401',
   delete_dead: '删除死号',
   low_quota_policy: '席位策略',
+  auto_maintenance: '完整自动维护',
   convert: '转换校验',
   import_cached: '缓存导入',
   import_text: '粘贴导入'
@@ -157,12 +158,18 @@ async function saveConfig() {
       SUB2API_WEB_PUBLIC_BASE_URL: formValue('cfg_public_base_url'),
       SUB2API_AUTO_POLICY_ENABLED: formValue('cfg_auto_policy_enabled'),
       SUB2API_AUTO_POLICY_INTERVAL_SECONDS: formValue('cfg_auto_policy_interval'),
-      SUB2API_AUTO_POLICY_RUN_ON_START: formValue('cfg_auto_policy_run_on_start')
+      SUB2API_AUTO_POLICY_RUN_ON_START: formValue('cfg_auto_policy_run_on_start'),
+      SUB2API_OIDC_API_URL: formValue('cfg_oidc_api_url'),
+      SUB2API_AUTO_REGISTER_COUNT: formValue('cfg_auto_register_count'),
+      SUB2API_AUTO_REGISTER_THRESHOLD: formValue('cfg_auto_register_threshold'),
+      SUB2API_AUTO_REGISTER_DOMAIN: formValue('cfg_auto_register_domain'),
     };
     const adminApiKey = formValue('cfg_api_key');
     if (adminApiKey) config.SUB2API_ADMIN_API_KEY = adminApiKey;
     const webSecret = formValue('cfg_web_secret');
     if (webSecret) config.SUB2API_WEB_SECRET = webSecret;
+    const oidcApiKey = formValue('cfg_oidc_api_key');
+    if (oidcApiKey) config.SUB2API_OIDC_API_KEY = oidcApiKey;
     await api('/api/config/save', config);
     setText('config_status', '配置已保存');
     setStat('stat_proxy', formValue('cfg_outbound_proxy') ? '已配置' : '未配置');

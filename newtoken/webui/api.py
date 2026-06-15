@@ -29,6 +29,7 @@ from newtoken.webui.oauth import (
     complete_oauth_manually,
     start_oauth_flow,
 )
+from newtoken.webui.oidc_client import invalidate_oidc_cache
 from newtoken.webui.remote import build_remote_summary, delete_selected_remote_items
 from newtoken.webui.utils import parse_positive_int, redact_config
 
@@ -46,6 +47,10 @@ SAVE_CONFIG_KEYS = {
     "SUB2API_AUTO_POLICY_ENABLED",
     "SUB2API_AUTO_POLICY_INTERVAL_SECONDS",
     "SUB2API_AUTO_POLICY_RUN_ON_START",
+    "SUB2API_OIDC_API_URL",
+    "SUB2API_AUTO_REGISTER_COUNT",
+    "SUB2API_AUTO_REGISTER_THRESHOLD",
+    "SUB2API_AUTO_REGISTER_DOMAIN",
 }
 
 
@@ -94,7 +99,10 @@ def save_config_from_payload(state: WebState, payload: dict[str, Any]) -> dict[s
     }
     if "SUB2API_WEB_SECRET" in payload:
         updates["SUB2API_WEB_SECRET"] = str(payload.get("SUB2API_WEB_SECRET") or "")
+    if "SUB2API_OIDC_API_KEY" in payload and str(payload.get("SUB2API_OIDC_API_KEY") or ""):
+        updates["SUB2API_OIDC_API_KEY"] = str(payload.get("SUB2API_OIDC_API_KEY") or "")
     result = redact_config(state.save_config(updates))
+    invalidate_oidc_cache()
     if state.scheduler:
         state.scheduler.wake()
     return result
@@ -172,6 +180,9 @@ def start_named_task(state: WebState, payload: dict[str, Any]) -> str:
         return state.tasks.create(action, delete_selected_remote_items, state, "dead")
     if action == "low_quota_policy":
         return state.tasks.create(action, enforce_acc_low_quota_policy, state)
+    if action == "auto_maintenance":
+        from newtoken.webui.auto import run_auto_maintenance
+        return state.tasks.create(action, run_auto_maintenance, state)
     if action == "convert":
         return state.tasks.create(
             action,

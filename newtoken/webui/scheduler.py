@@ -7,12 +7,12 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from newtoken.webui.acc import enforce_acc_low_quota_policy
+from newtoken.webui.auto import run_auto_maintenance
 from newtoken.webui.config import (
+    AUTO_MAINTENANCE_TASK_LABEL,
     AUTO_POLICY_DEFAULT_INTERVAL_SECONDS,
     AUTO_POLICY_MAX_INTERVAL_SECONDS,
     AUTO_POLICY_MIN_INTERVAL_SECONDS,
-    AUTO_POLICY_TASK_LABEL,
 )
 from newtoken.webui.utils import parse_bool_text, parse_positive_int
 
@@ -165,8 +165,8 @@ class WebScheduler:
             return
         try:
             task_id = self.state.tasks.create(
-                AUTO_POLICY_TASK_LABEL,
-                enforce_acc_low_quota_policy,
+                AUTO_MAINTENANCE_TASK_LABEL,
+                run_auto_maintenance,
                 self.state,
             )
         except Exception as exc:  # noqa: BLE001
