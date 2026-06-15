@@ -33,9 +33,13 @@ function app_api_auth_clients(): bool
         app_json(['ok' => false, 'error' => 'clients API disabled'], 503);
     }
     $allow = (array) app_config('clients_admin_ip_allowlist', []);
-    if (!empty($allow) && !in_array(app_ip(), $allow, true)) {
-        app_audit('system', null, 'clients_api_ip_blocked', 'ip', app_ip(), []);
-        app_json(['ok' => false, 'error' => 'ip not allowed'], 403);
+    if (!empty($allow)) {
+        // 用真实对端 REMOTE_ADDR，避免被 X-Forwarded-For / CF-Connecting-IP 伪造绕过白名单
+        $peer = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '';
+        if (!in_array($peer, $allow, true)) {
+            app_audit('system', null, 'clients_api_ip_blocked', 'ip', $peer, []);
+            app_json(['ok' => false, 'error' => 'ip not allowed'], 403);
+        }
     }
     app_api_check_bearer($key);
     return true;
@@ -74,7 +78,7 @@ function app_api_card_lookup(): void
 function app_api_status(): void
 {
     app_api_auth_cards();
-    $db = app_db();
+    $db = app_pdo();
     app_json(['ok'=>true,'unused_cards'=>(int)$db->query("SELECT COUNT(*) FROM card_keys WHERE status='unused'")->fetchColumn(),
               'active_users'=>(int)$db->query("SELECT COUNT(*) FROM users WHERE status='active'")->fetchColumn()]);
 }
@@ -116,8 +120,8 @@ function app_api_clients_get(string $clientId): void
         if (!app_config('clients_secret_reveal_enabled', false)) {
             app_json(['ok' => false, 'error' => 'reveal disabled'], 403);
         }
-        app_audit('system', null, 'client_secret_revealed', 'client', $clientId, ['via' => 'api']);
         $client['client_secret'] = app_client_reveal_secret($clientId);
+        app_audit('system', null, 'client_secret_revealed', 'client', $clientId, ['via' => 'api']);
     }
     app_json(['ok' => true, 'client' => $client]);
 }
@@ -127,15 +131,18 @@ function app_api_clients_update(string $clientId): void
     app_api_auth_clients();
     $body = json_decode(file_get_contents('php://input'), true) ?: [];
     try {
-        if (!empty($body['rotate_secret'])) {
-            app_json(['ok' => true, 'client_secret' => app_client_rotate_secret($clientId, null)]);
-        }
         $changes = [];
         foreach (['name', 'redirect_uris', 'allowed_domains', 'status'] as $k) {
             if (array_key_exists($k, $body)) { $changes[$k] = $body[$k]; }
         }
-        app_client_update($clientId, $changes, null);
-        app_json(['ok' => true]);
+        if ($changes) {
+            app_client_update($clientId, $changes, null);
+        }
+        $resp = ['ok' => true];
+        if (!empty($body['rotate_secret'])) {
+            $resp['client_secret'] = app_client_rotate_secret($clientId, null);
+        }
+        app_json($resp);
     } catch (Exception $e) {
         app_json(['ok' => false, 'error' => $e->getMessage()], 400);
     }

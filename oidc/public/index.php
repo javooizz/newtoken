@@ -739,6 +739,10 @@ if ($path === '/authorize') {
             if (!$params) {
                 throw new RuntimeException('缺少待处理的授权请求。');
             }
+            $resumeClient = app_client_find($params['client_id'] ?? '');
+            if (!$resumeClient || $resumeClient['status'] !== 'active') {
+                throw new RuntimeException('client_id 无效。');
+            }
         } else {
             $params = [
                 'client_id' => app_query('client_id'),
