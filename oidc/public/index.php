@@ -238,6 +238,10 @@ if ($path === '/userinfo') {
 if ($path === '/api/status') { app_api_status(); }
 if ($path === '/api/cards/generate' && app_method() === 'POST') { app_api_cards_generate(); }
 if ($path === '/api/cards/lookup' && app_method() === 'POST') { app_api_card_lookup(); }
+if ($path === '/api/clients' && app_method() === 'POST') { app_api_clients_create(); }
+if ($path === '/api/clients' && app_method() === 'GET') { app_api_clients_list(); }
+if (preg_match('#^/api/clients/([A-Za-z0-9_]+)$#', $path, $m) && app_method() === 'GET') { app_api_clients_get($m[1]); }
+if (preg_match('#^/api/clients/([A-Za-z0-9_]+)$#', $path, $m) && app_method() === 'PATCH') { app_api_clients_update($m[1]); }
 
 if ($path === '/') {
     $lookup = [];
