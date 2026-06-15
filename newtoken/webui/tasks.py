@@ -128,12 +128,15 @@ class WebTaskStore:
             "failed",
             "account_created",
             "account_failed",
+            "elapsed",
         )
         result_summary = {
             key: result.get(key)
             for key in summary_keys
             if key in result
         }
+        if isinstance(result.get("errors"), list):
+            result_summary["errors"] = len(result["errors"])
         return {
             "id": task.get("id"),
             "label": task.get("label"),

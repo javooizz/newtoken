@@ -13,26 +13,28 @@ from newtoken.sub2api.remote import (
 from newtoken.common.http_client import parse_socks5_proxy_url
 from newtoken.webui.acc import (
     apply_acc_payload,
+    build_acc_env_values,
     change_acc_user_seat,
     enforce_acc_low_quota_policy,
     load_acc_members,
+    parse_acc_import_payload,
 )
 from newtoken.webui.config import (
+    AUTO_MAINTENANCE_TASK_LABEL,
     AUTO_POLICY_DEFAULT_INTERVAL_SECONDS,
     AUTO_POLICY_MAX_INTERVAL_SECONDS,
     AUTO_POLICY_MIN_INTERVAL_SECONDS,
+    SETUP_DONE_KEY,
     WebState,
+    get_setup_missing_fields,
 )
 from newtoken.webui.conversion import import_cached_conversion, run_conversion
-from newtoken.webui.oauth import (
-    build_oauth_status,
-    complete_oauth_manually,
-    start_oauth_flow,
-)
+from newtoken.webui.oidc_client import invalidate_oidc_cache, oidc_status
 from newtoken.webui.remote import build_remote_summary, delete_selected_remote_items
-from newtoken.webui.utils import parse_positive_int, redact_config
+from newtoken.webui.utils import parse_bool_text, parse_positive_int, redact_config
 
 SAVE_CONFIG_KEYS = {
+    SETUP_DONE_KEY,
     "SUB2API_BASE_URL",
     "SUB2API_ADMIN_API_KEY",
     "SUB2API_GROUP_IDS",
@@ -46,6 +48,19 @@ SAVE_CONFIG_KEYS = {
     "SUB2API_AUTO_POLICY_ENABLED",
     "SUB2API_AUTO_POLICY_INTERVAL_SECONDS",
     "SUB2API_AUTO_POLICY_RUN_ON_START",
+    "ACC_MOTHER_ACCOUNT_EMAIL",
+    "OPENAI_ACCESS_TOKEN",
+    "OPENAI_ACCOUNT_ID",
+    "OPENAI_DEVICE_ID",
+    "OPENAI_SESSION_TOKEN",
+    "OPENAI_CLIENT_BUILD_NUMBER",
+    "OPENAI_CLIENT_VERSION",
+    "OPENAI_BASE_URL",
+    "SUB2API_OIDC_API_URL",
+    "SUB2API_AUTO_REGISTER_ENABLED",
+    "SUB2API_AUTO_REGISTER_COUNT",
+    "SUB2API_AUTO_REGISTER_THRESHOLD",
+    "SUB2API_AUTO_REGISTER_DOMAIN",
 }
 
 
@@ -54,15 +69,10 @@ def dispatch_api(path: str, payload: dict[str, Any], state: WebState) -> Any:
         return save_config_from_payload(state, payload)
     if path == "/api/remote/test":
         return test_sub2api_connection(state.build_remote_config())
+    if path == "/api/oidc/test":
+        return oidc_status(state.load_config())
     if path == "/api/tasks/start":
         return {"task_id": start_named_task(state, payload)}
-    if path == "/api/oauth/start":
-        form = {key: str(value or "") for key, value in payload.items()}
-        return start_oauth_flow(state, form)
-    if path == "/api/oauth/status":
-        return build_oauth_status(state)
-    if path == "/api/oauth/manual-complete":
-        return complete_oauth_manually(state, str(payload.get("auth_input") or ""))
     if path == "/api/acc/apply":
         return apply_acc_payload(state, str(payload.get("payload") or ""))
     if path == "/api/acc/members":
@@ -87,17 +97,61 @@ def save_config_from_payload(state: WebState, payload: dict[str, Any]) -> dict[s
     validate_web_port(payload)
     normalize_concurrency_fields(payload)
     normalize_scheduler_fields(payload)
+    normalize_auto_register_fields(payload)
     updates = {
         key: str(payload.get(key) or "")
         for key in SAVE_CONFIG_KEYS
         if key in payload
     }
+    acc_payload = str(payload.get("ACC_PAYLOAD") or "").strip()
+    if acc_payload:
+        updates.update(parse_acc_payload_for_config(state, acc_payload))
     if "SUB2API_WEB_SECRET" in payload:
         updates["SUB2API_WEB_SECRET"] = str(payload.get("SUB2API_WEB_SECRET") or "")
-    result = redact_config(state.save_config(updates))
+    if "SUB2API_OIDC_API_KEY" in payload and str(payload.get("SUB2API_OIDC_API_KEY") or "").strip():
+        updates["SUB2API_OIDC_API_KEY"] = str(payload.get("SUB2API_OIDC_API_KEY") or "")
+    setup_missing: list[str] = []
+    if updates.get(SETUP_DONE_KEY, "").strip().lower() in {"1", "true", "yes", "on"}:
+        merged = dict(state.load_config())
+        merged.update(updates)
+        setup_missing = get_setup_missing_fields(merged)
+        if setup_missing:
+            updates[SETUP_DONE_KEY] = "false"
+    saved_values = state.save_config(updates)
+    result = redact_config(saved_values)
+    invalidate_oidc_cache()
     if state.scheduler:
         state.scheduler.wake()
+    if setup_missing:
+        raise ValueError("安装配置未完成：" + "，".join(setup_missing))
     return result
+
+
+def parse_acc_payload_for_config(state: WebState, raw_text: str) -> dict[str, str]:
+    payload = parse_acc_import_payload(raw_text)
+    current_values = state.load_config()
+    base_url = (
+        str(current_values.get("OPENAI_BASE_URL") or "").strip()
+        or seat_core.DEFAULT_BASE_URL
+    )
+    credentials = build_acc_env_values(
+        payload.get("accessToken", ""),
+        payload.get("accountId", ""),
+        payload.get("deviceId", ""),
+        payload.get("sessionToken", ""),
+        payload.get("clientBuildNumber", ""),
+        payload.get("clientVersion", ""),
+        base_url,
+    )
+    if payload.get("sessionToken"):
+        session_data = seat_core.fetch_session_info(
+            base_url,
+            payload["sessionToken"],
+        )
+        access_token, account_id = seat_core.extract_session_credentials(session_data)
+        credentials["OPENAI_ACCESS_TOKEN"] = access_token
+        credentials["OPENAI_ACCOUNT_ID"] = account_id
+    return credentials
 
 
 def validate_web_port(payload: dict[str, Any]) -> None:
@@ -155,6 +209,33 @@ def normalize_scheduler_fields(payload: dict[str, Any]) -> None:
         payload[bool_key] = "true" if raw_value in {"1", "true", "yes", "on"} else "false"
 
 
+def normalize_auto_register_fields(payload: dict[str, Any]) -> None:
+    if "SUB2API_AUTO_REGISTER_COUNT" in payload:
+        payload["SUB2API_AUTO_REGISTER_COUNT"] = str(
+            parse_positive_int(
+                payload.get("SUB2API_AUTO_REGISTER_COUNT"),
+                default=3,
+                minimum=1,
+                maximum=20,
+            )
+        )
+    if "SUB2API_AUTO_REGISTER_THRESHOLD" in payload:
+        payload["SUB2API_AUTO_REGISTER_THRESHOLD"] = str(
+            parse_positive_int(
+                payload.get("SUB2API_AUTO_REGISTER_THRESHOLD"),
+                default=1,
+                minimum=0,
+                maximum=200,
+            )
+        )
+    if "SUB2API_AUTO_REGISTER_ENABLED" in payload:
+        payload["SUB2API_AUTO_REGISTER_ENABLED"] = (
+            "true"
+            if parse_bool_text(payload.get("SUB2API_AUTO_REGISTER_ENABLED"), default=True)
+            else "false"
+        )
+
+
 def start_named_task(state: WebState, payload: dict[str, Any]) -> str:
     action = str(payload.get("action") or "").strip()
     if action == "remote_scan":
@@ -172,6 +253,10 @@ def start_named_task(state: WebState, payload: dict[str, Any]) -> str:
         return state.tasks.create(action, delete_selected_remote_items, state, "dead")
     if action == "low_quota_policy":
         return state.tasks.create(action, enforce_acc_low_quota_policy, state)
+    if action == AUTO_MAINTENANCE_TASK_LABEL:
+        from newtoken.webui.auto import run_auto_maintenance
+
+        return state.tasks.create(action, run_auto_maintenance, state)
     if action == "convert":
         return state.tasks.create(
             action,

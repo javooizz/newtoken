@@ -7,12 +7,15 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from newtoken.webui.acc import enforce_acc_low_quota_policy
+from newtoken.webui.auto import run_auto_maintenance
 from newtoken.webui.config import (
+    AUTO_MAINTENANCE_TASK_LABEL,
     AUTO_POLICY_DEFAULT_INTERVAL_SECONDS,
     AUTO_POLICY_MAX_INTERVAL_SECONDS,
     AUTO_POLICY_MIN_INTERVAL_SECONDS,
-    AUTO_POLICY_TASK_LABEL,
+    get_setup_missing_fields,
+    has_effective_config_value,
+    is_setup_complete,
 )
 from newtoken.webui.utils import parse_bool_text, parse_positive_int
 
@@ -52,13 +55,15 @@ def read_policy_scheduler_config(values: dict[str, str]) -> PolicySchedulerConfi
 def find_missing_policy_config(values: dict[str, str]) -> list[str]:
     """Return missing config keys that would make the policy task fail immediately."""
 
+    if not is_setup_complete(values):
+        return get_setup_missing_fields(values)
     missing: list[str] = []
     for key in ("SUB2API_BASE_URL", "SUB2API_ADMIN_API_KEY", "OPENAI_ACCOUNT_ID"):
-        if not str(values.get(key) or "").strip():
+        if not has_effective_config_value(key, values.get(key, "")):
             missing.append(key)
-    if not str(values.get("OPENAI_ACCESS_TOKEN") or "").strip() and not str(
-        values.get("OPENAI_SESSION_TOKEN") or ""
-    ).strip():
+    if not has_effective_config_value("OPENAI_ACCESS_TOKEN", values.get("OPENAI_ACCESS_TOKEN", "")) and not has_effective_config_value(
+        "OPENAI_SESSION_TOKEN", values.get("OPENAI_SESSION_TOKEN", "")
+    ):
         missing.append("OPENAI_ACCESS_TOKEN/OPENAI_SESSION_TOKEN")
     return missing
 
@@ -165,8 +170,8 @@ class WebScheduler:
             return
         try:
             task_id = self.state.tasks.create(
-                AUTO_POLICY_TASK_LABEL,
-                enforce_acc_low_quota_policy,
+                AUTO_MAINTENANCE_TASK_LABEL,
+                run_auto_maintenance,
                 self.state,
             )
         except Exception as exc:  # noqa: BLE001

@@ -1,30 +1,22 @@
 # Changelog
-
 ## 2026-06-15
 
-### 重构：OAuth 一步建号流程
+### 重构：WebUI 安装向导与自动维护控制台
 
-**背景：** 原 WebUI 的 OAuth 建号是"生成授权链接"+"完成建号"两个分立按钮，用户容易把"登录授权"和"建号导入"当成两个独立动作，中间停顿可能触发接码验证。
+**背景：** 旧 WebUI 把安装、配置、手动 OAuth 建号和日常运维混在一个页面里，容易让首次部署的人误操作，也不利于宝塔面板部署。
 
 **改动：**
 
-- `newtoken/webui/oauth.py` 重写：增加状态机（idle → waiting_callback → creating_account → done/error），`threading.Lock` 防止回调重复建号
-- `newtoken/webui/server.py`：新增 `GET /oauth/callback` 公开入口，OpenAI 授权后自动回调触发建号
-- `newtoken/webui/api.py`：旧路由 `/api/oauth/create`、`/api/oauth/complete` 替换为 `/api/oauth/start`、`/api/oauth/status`、`/api/oauth/manual-complete`
-- `newtoken/webui/page.py`：OAuth 区块改为一步式布局——一个主按钮 + 状态展示 + 手动 Code 兜底
-- `newtoken/webui/assets.py`：前端实现 `startOauth()` 一步启动、自动弹出授权页、每 2s 轮询状态、状态切换 CSS 反馈
-- `newtoken/webui/config.py`：`WebState` 增加 `oauth_lock`；`WEB_ENV_FIELD_ORDER` 和 `WEB_DEFAULT_ENV_VALUES` 增加 `SUB2API_WEB_PUBLIC_BASE_URL`
-
-### 新增配置项
-
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `SUB2API_WEB_PUBLIC_BASE_URL` | 空 | 宝塔反代或公网部署时，用于生成 OAuth redirect URI |
+- WebUI 改为“安装配置页 + 控制台”两段式
+- 安装未完成时不会进入完整控制台
+- 去掉手动 OAuth 一步建号入口，后台自动维护改为唯一入口
+- 增加 OIDC API 配置、母号 ACC 配置、自动注册域名、自动注册数量和阈值
+- 安装完成后，后台调度器自动运行完整维护流程
+- 修复自动维护远程扫描统计字段错误，避免误判池子为空
 
 ### WebUI 优化
 
-- 登录页改用 CSS 变量（原硬编码色值），与主面板主题一致
-- OAuth 状态块去掉内联样式，改用 `.oauth-state` CSS 类，区分 ok/bad 状态背景色
-- `build_index_view` 移除无效模板变量 `oauth_redirect_uri`
-- `_parse_group_ids` 增加 `ValueError` 和 `gid > 0` 校验
-- `_handle_oauth_callback` 回调页面增加与登录页一致的最简样式
+- 统一控制台视觉层级，减少重复配置区块
+- 设置区、状态区、任务区分层更清晰
+- 安装状态直接展示缺失项
+- 保留 SOCKS5 出站代理和 CSRF 防护
