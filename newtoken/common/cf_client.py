@@ -34,11 +34,13 @@ CF_MARKERS = [
 
 _IMPERSONATES = ["chrome120", "chrome124", "chrome131"]
 _session: Any = None
+_last_proxy: str = ""
 
 
 def _get_session(proxy_url: str = "") -> Any:
-    global _session
-    if _session is not None:
+    global _session, _last_proxy
+    proxy = str(proxy_url or "").strip()
+    if _session is not None and proxy == _last_proxy:
         return _session
     _session = curl_requests.Session(impersonate=random.choice(_IMPERSONATES))
     _session.headers.update({
@@ -46,8 +48,9 @@ def _get_session(proxy_url: str = "") -> Any:
         "Accept-Language": "en-US,en;q=0.9",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     })
-    if proxy_url:
-        _session.proxies = {"http": proxy_url, "https": proxy_url}
+    if proxy:
+        _session.proxies = {"http": proxy, "https": proxy}
+    _last_proxy = proxy
     return _session
 
 
@@ -143,7 +146,7 @@ def _rotate_session() -> None:
 def _resolve_proxy(proxy_url: str) -> str:
     if proxy_url:
         return proxy_url
-    for key in ("SUB2API_OUTBOUND_PROXY_URL", "SOCKS5_PROXY_URL", "ALL_PROXY"):
+    for key in ("SUB2API_OUTBOUND_PROXY_URL", "SUB2API_SOCKS5_PROXY_URL", "SOCKS5_PROXY_URL", "ALL_PROXY"):
         val = os.environ.get(key, "").strip()
         if val:
             return val
