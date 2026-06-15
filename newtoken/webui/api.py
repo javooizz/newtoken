@@ -13,7 +13,7 @@ from newtoken.sub2api.remote import (
 from newtoken.common.http_client import parse_socks5_proxy_url
 from newtoken.webui.acc import (
     apply_acc_payload,
-    build_acc_env_values,
+    build_acc_credentials_from_payload,
     change_acc_user_seat,
     enforce_acc_low_quota_policy,
     load_acc_members,
@@ -129,29 +129,7 @@ def save_config_from_payload(state: WebState, payload: dict[str, Any]) -> dict[s
 
 def parse_acc_payload_for_config(state: WebState, raw_text: str) -> dict[str, str]:
     payload = parse_acc_import_payload(raw_text)
-    current_values = state.load_config()
-    base_url = (
-        str(current_values.get("OPENAI_BASE_URL") or "").strip()
-        or seat_core.DEFAULT_BASE_URL
-    )
-    credentials = build_acc_env_values(
-        payload.get("accessToken", ""),
-        payload.get("accountId", ""),
-        payload.get("deviceId", ""),
-        payload.get("sessionToken", ""),
-        payload.get("clientBuildNumber", ""),
-        payload.get("clientVersion", ""),
-        base_url,
-    )
-    if payload.get("sessionToken"):
-        session_data = seat_core.fetch_session_info(
-            base_url,
-            payload["sessionToken"],
-        )
-        access_token, account_id = seat_core.extract_session_credentials(session_data)
-        credentials["OPENAI_ACCESS_TOKEN"] = access_token
-        credentials["OPENAI_ACCOUNT_ID"] = account_id
-    return credentials
+    return build_acc_credentials_from_payload(state, payload)
 
 
 def validate_web_port(payload: dict[str, Any]) -> None:

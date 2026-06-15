@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import newtoken.acc.seat_client as seat_core
@@ -13,6 +14,170 @@ from newtoken.sub2api.usage_bridge import (
     set_remote_accounts_inactive,
 )
 from newtoken.webui.config import LOW_QUOTA_THRESHOLD_PERCENT, SeatApiWebError, WebState
+
+_ACC_EMPTY_VALUES = {"", "none", "null", "undefined"}
+
+_ENV_TO_ACC_KEYS = {
+    "OPENAI_ACCESS_TOKEN": "accessToken",
+    "ACCESS_TOKEN": "accessToken",
+    "accessToken": "accessToken",
+    "access_token": "accessToken",
+    "OPENAI_SESSION_TOKEN": "sessionToken",
+    "SESSION_TOKEN": "sessionToken",
+    "sessionToken": "sessionToken",
+    "session_token": "sessionToken",
+    "OPENAI_ACCOUNT_ID": "accountId",
+    "ACCOUNT_ID": "accountId",
+    "accountId": "accountId",
+    "account_id": "accountId",
+    "OPENAI_DEVICE_ID": "deviceId",
+    "DEVICE_ID": "deviceId",
+    "deviceId": "deviceId",
+    "device_id": "deviceId",
+    "OPENAI_CLIENT_BUILD_NUMBER": "clientBuildNumber",
+    "clientBuildNumber": "clientBuildNumber",
+    "client_build_number": "clientBuildNumber",
+    "OPENAI_CLIENT_VERSION": "clientVersion",
+    "clientVersion": "clientVersion",
+    "client_version": "clientVersion",
+    "OPENAI_BASE_URL": "baseUrl",
+    "baseUrl": "baseUrl",
+    "base_url": "baseUrl",
+}
+
+_PAYLOAD_KEYS = (
+    "warningBanner",
+    "accountId",
+    "deviceId",
+    "accessToken",
+    "sessionToken",
+    "authProvider",
+    "clientBuildNumber",
+    "clientVersion",
+    "baseUrl",
+)
+
+
+def _empty_acc_payload() -> dict[str, str]:
+    return {key: "" for key in _PAYLOAD_KEYS}
+
+
+def _clean_acc_value(value: Any) -> str:
+    text = str(value or "").strip().strip('"').strip("'").strip()
+    return "" if text.lower() in _ACC_EMPTY_VALUES else text
+
+
+def _first_value(data: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        if key in data:
+            value = _clean_acc_value(data.get(key))
+            if value:
+                return value
+    return ""
+
+
+def _merge_payload(base: dict[str, str], extra: dict[str, str]) -> dict[str, str]:
+    merged = dict(base)
+    for key, value in extra.items():
+        if value and not merged.get(key):
+            merged[key] = value
+    return merged
+
+
+def _payload_has_credentials(payload: dict[str, str]) -> bool:
+    return bool(payload.get("accessToken") or payload.get("sessionToken") or payload.get("accountId"))
+
+
+def _parse_env_style_payload(text: str) -> dict[str, str] | None:
+    payload = _empty_acc_payload()
+    found = False
+    for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.lower().startswith("export "):
+            line = line[7:].strip()
+        if "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        mapped_key = _ENV_TO_ACC_KEYS.get(key)
+        if not mapped_key:
+            continue
+        value = raw_value.strip()
+        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+            try:
+                value = str(json.loads(value))
+            except json.JSONDecodeError:
+                value = value[1:-1]
+        payload[mapped_key] = _clean_acc_value(value)
+        found = True
+    return payload if found and _payload_has_credentials(payload) else None
+
+
+def _payload_from_json_dict(data: dict[str, Any]) -> dict[str, str]:
+    account_data = data.get("account") if isinstance(data.get("account"), dict) else {}
+    payload = _empty_acc_payload()
+    payload.update(
+        {
+            "warningBanner": _first_value(data, "WARNING_BANNER", "warningBanner"),
+            "accountId": _first_value(
+                account_data,
+                "id",
+                "accountId",
+                "account_id",
+                "OPENAI_ACCOUNT_ID",
+            )
+            or _first_value(data, "accountId", "account_id", "OPENAI_ACCOUNT_ID", "account-id"),
+            "deviceId": _first_value(
+                data,
+                "deviceId",
+                "device_id",
+                "OPENAI_DEVICE_ID",
+                "oai-did",
+                "oaiDid",
+                "did",
+            ),
+            "accessToken": _first_value(data, "accessToken", "access_token", "OPENAI_ACCESS_TOKEN"),
+            "sessionToken": _first_value(data, "sessionToken", "session_token", "OPENAI_SESSION_TOKEN"),
+            "authProvider": _first_value(data, "authProvider", "auth_provider"),
+            "clientBuildNumber": _first_value(
+                data,
+                "clientBuildNumber",
+                "client_build_number",
+                "OPENAI_CLIENT_BUILD_NUMBER",
+            ),
+            "clientVersion": _first_value(data, "clientVersion", "client_version", "OPENAI_CLIENT_VERSION"),
+            "baseUrl": _first_value(data, "baseUrl", "base_url", "OPENAI_BASE_URL"),
+        }
+    )
+    for child_key in ("payload", "credentials", "session", "data"):
+        child = data.get(child_key)
+        if isinstance(child, dict):
+            payload = _merge_payload(payload, _payload_from_json_dict(child))
+    return payload
+
+
+def _parse_cookie_payload(text: str) -> dict[str, str] | None:
+    match = re.search(
+        r"(?:__Secure-next-auth\.session-token|next-auth\.session-token)\s*=\s*([^;\s\"']+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    payload = _empty_acc_payload()
+    payload["sessionToken"] = _clean_acc_value(match.group(1))
+    return payload if payload["sessionToken"] else None
+
+
+def _parse_bearer_payload(text: str) -> dict[str, str] | None:
+    match = re.search(r"\bBearer\s+([A-Za-z0-9._~+/=-]+)", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    payload = _empty_acc_payload()
+    payload["accessToken"] = _clean_acc_value(match.group(1))
+    return payload if payload["accessToken"] else None
 
 
 def build_acc_env_values(
@@ -50,6 +215,10 @@ def parse_acc_import_payload(raw_text: str) -> dict[str, str]:
     if not text:
         raise SeatApiWebError("导入内容为空")
 
+    env_payload = _parse_env_style_payload(text)
+    if env_payload:
+        return env_payload
+
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
@@ -58,25 +227,8 @@ def parse_acc_import_payload(raw_text: str) -> dict[str, str]:
     if isinstance(data, dict):
         if isinstance(data.get("log"), dict):
             return seat_core.parse_har_session_bundle(text)
-        account_data = data.get("account") if isinstance(data.get("account"), dict) else {}
-        payload = {
-            "warningBanner": str(data.get("WARNING_BANNER") or "").strip(),
-            "accountId": str(account_data.get("id") or data.get("account_id") or "").strip(),
-            "deviceId": str(
-                data.get("deviceId")
-                or data.get("device_id")
-                or data.get("oai-did")
-                or data.get("oaiDid")
-                or data.get("did")
-                or ""
-            ).strip(),
-            "accessToken": str(data.get("accessToken") or "").strip(),
-            "sessionToken": str(data.get("sessionToken") or "").strip(),
-            "authProvider": str(data.get("authProvider") or "").strip(),
-            "clientBuildNumber": str(data.get("clientBuildNumber") or "").strip(),
-            "clientVersion": str(data.get("clientVersion") or "").strip(),
-        }
-        if payload["accessToken"] or payload["sessionToken"]:
+        payload = _payload_from_json_dict(data)
+        if _payload_has_credentials(payload):
             return payload
 
     split_marker = '\",\"authProvider\"'
@@ -97,23 +249,61 @@ def parse_acc_import_payload(raw_text: str) -> dict[str, str]:
             "authProvider": str(suffix_data.get("authProvider") or "").strip(),
             "clientBuildNumber": "",
             "clientVersion": "",
+            "baseUrl": "",
         }
         if payload["accessToken"] or payload["sessionToken"]:
             return payload
 
-    if text.count(".") >= 2 and '"sessionToken"' not in text:
-        return {
-            "warningBanner": "",
-            "accountId": "",
-            "deviceId": "",
-            "accessToken": text,
-            "sessionToken": "",
-            "authProvider": "",
-            "clientBuildNumber": "",
-            "clientVersion": "",
-        }
+    cookie_payload = _parse_cookie_payload(text)
+    if cookie_payload:
+        return cookie_payload
+
+    bearer_payload = _parse_bearer_payload(text)
+    if bearer_payload:
+        return bearer_payload
+
+    if text.count(".") >= 2 and '"sessionToken"' not in text and "\n" not in text:
+        payload = _empty_acc_payload()
+        payload["accessToken"] = text
+        return payload
 
     raise SeatApiWebError("无法识别导入格式")
+
+
+def build_acc_credentials_from_payload(
+    state: WebState,
+    payload: dict[str, str],
+    *,
+    resolve_session: bool = True,
+) -> dict[str, str]:
+    current_values = state.load_config()
+    base_url = (
+        payload.get("baseUrl")
+        or str(current_values.get("OPENAI_BASE_URL") or "").strip()
+        or seat_core.DEFAULT_BASE_URL
+    )
+    credentials = build_acc_env_values(
+        payload.get("accessToken", ""),
+        payload.get("accountId", ""),
+        payload.get("deviceId", ""),
+        payload.get("sessionToken", ""),
+        payload.get("clientBuildNumber", ""),
+        payload.get("clientVersion", ""),
+        base_url,
+    )
+    if (
+        resolve_session
+        and payload.get("sessionToken")
+        and (not credentials.get("OPENAI_ACCESS_TOKEN") or not credentials.get("OPENAI_ACCOUNT_ID"))
+    ):
+        session_data = seat_core.fetch_session_info(
+            credentials["OPENAI_BASE_URL"],
+            payload["sessionToken"],
+        )
+        access_token, account_id = seat_core.extract_session_credentials(session_data)
+        credentials["OPENAI_ACCESS_TOKEN"] = access_token
+        credentials["OPENAI_ACCOUNT_ID"] = account_id
+    return credentials
 
 
 def load_acc_members(state: WebState, query: str = "") -> dict[str, Any]:
@@ -284,27 +474,13 @@ def change_acc_user_seat(state: WebState, user_id: str, email: str, seat_type: s
 
 def apply_acc_payload(state: WebState, raw_text: str) -> dict[str, Any]:
     payload = parse_acc_import_payload(raw_text)
-    current_values = state.load_config()
-    base_url = (
-        str(current_values.get("OPENAI_BASE_URL") or "").strip()
-        or seat_core.DEFAULT_BASE_URL
-    )
-    credentials = build_acc_env_values(
-        payload.get("accessToken", ""),
-        payload.get("accountId", ""),
-        payload.get("deviceId", ""),
-        payload.get("sessionToken", ""),
-        payload.get("clientBuildNumber", ""),
-        payload.get("clientVersion", ""),
-        base_url,
-    )
-    if payload.get("sessionToken"):
-        session_data = seat_core.fetch_session_info(
-            base_url,
-            payload["sessionToken"],
-        )
-        access_token, account_id = seat_core.extract_session_credentials(session_data)
-        credentials["OPENAI_ACCESS_TOKEN"] = access_token
-        credentials["OPENAI_ACCOUNT_ID"] = account_id
+    credentials = build_acc_credentials_from_payload(state, payload)
     state.save_config(credentials)
-    return {"saved": True, "account_id": credentials.get("OPENAI_ACCOUNT_ID", "")}
+    has_token = bool(credentials.get("OPENAI_ACCESS_TOKEN") or credentials.get("OPENAI_SESSION_TOKEN"))
+    has_account = bool(credentials.get("OPENAI_ACCOUNT_ID"))
+    return {
+        "saved": True,
+        "account_id": credentials.get("OPENAI_ACCOUNT_ID", ""),
+        "has_token": has_token,
+        "has_account_id": has_account,
+    }

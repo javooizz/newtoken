@@ -1,6 +1,15 @@
 # Changelog
 ## 2026-06-15
 
+### 修复：ACC 导入解析兼容性
+
+**改动：**
+
+- ACC 粘贴框现在兼容 `OPENAI_*` / `ACCESS_TOKEN` / `SESSION_TOKEN` 这类 `.env` 片段
+- 兼容 Cookie 里的 `session-token`
+- 兼容直接粘贴 Bearer token
+- 当已提供 `accessToken` 和 `accountId` 时，不再因为同时存在 `sessionToken` 就强制联网覆盖
+
 ### 交付：补齐 OIDC 源码与部署文档
 
 **背景：** WebUI 已经有 OIDC 配置入口，但仓库缺少 OIDC 服务源码和部署说明，别人拿到项目后无法完整部署。
