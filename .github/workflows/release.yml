@@ -1,0 +1,81 @@
+name: Build And Release Standalone EXE
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Build Tooling
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+
+      - name: Build Onefile EXE
+        shell: pwsh
+        run: |
+          python .\build_sub2api_standalone_exe.py --onefile
+
+      - name: Resolve Release Tag
+        id: release_tag
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            "tag_name=${{ github.ref_name }}" >> $env:GITHUB_OUTPUT
+            "release_name=${{ github.ref_name }}" >> $env:GITHUB_OUTPUT
+          } else {
+            "tag_name=latest" >> $env:GITHUB_OUTPUT
+            "release_name=latest" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Ensure Tag Exists
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "${{ steps.release_tag.outputs.tag_name }}"
+          git push origin "refs/tags/${{ steps.release_tag.outputs.tag_name }}" --force
+
+      - name: Create Or Update Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.release_tag.outputs.tag_name }}"
+          $name = "${{ steps.release_tag.outputs.release_name }}"
+          $exe = "dist\Sub2API独立工具.exe"
+          $envExample = "dist\.env.example"
+          $note = "dist\首次使用说明.txt"
+          $notes = @"
+          自动构建时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+          提交: ${{ github.sha }}
+          "@
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title $name --notes $notes --latest
+            gh release upload $tag $exe $envExample $note --clobber
+          } else {
+            gh release create $tag $exe $envExample $note --title $name --notes $notes --latest
+          }

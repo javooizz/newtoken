@@ -1,0 +1,16 @@
+.env
+.chatgpt_session.json
+.session_cache.json
+.acc_input_cache.txt
+.acc_member_list_cache.json
+.acc_ui_settings_cache.json
+.sub2api_usage_cache.json
+__pycache__/
+.ruff_cache/
+build/
+dist/
+*.pyc
+*.pyo
+*.pyd
+*.har
+*.png
