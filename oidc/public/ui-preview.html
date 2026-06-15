@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPT OIDC 界面预览</title>
+  <style>
+    :root{--bg:#07111f;--panel:#101c34;--panel2:#162744;--line:#2b4268;--text:#e5eefc;--muted:#90a4c5;--blue:#4f8cff;--cyan:#39c6da;--green:#16a34a;--red:#dc2626;--shadow:0 24px 60px rgba(2,8,23,.45)}
+    *{box-sizing:border-box}body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;color:var(--text);background:radial-gradient(circle at top left,#0d1933 0,#07111f 48%,#040912 100%)}
+    .shell{max-width:1200px;margin:0 auto;padding:24px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:14px;border:1px solid var(--line);background:rgba(16,28,52,.76);border-radius:22px;padding:18px 20px;box-shadow:var(--shadow)}.brand{font-weight:800;letter-spacing:.08em;text-transform:uppercase}.nav{display:flex;gap:12px;flex-wrap:wrap}.nav a{color:#91b5ff;text-decoration:none}.hero{margin-top:22px;padding:30px;border-radius:28px;border:1px solid var(--line);background:linear-gradient(145deg,rgba(79,140,255,.15),rgba(57,198,218,.08),rgba(16,28,52,.92));box-shadow:var(--shadow)}.hero h1{margin:0 0 12px;font-size:36px}.hero p{margin:0;color:var(--muted);line-height:1.75;max-width:820px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-top:20px}.card{background:linear-gradient(180deg,rgba(22,39,68,.98),rgba(10,18,33,.98));border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:var(--shadow)}.card h2,.card h3{margin:0 0 12px}.card p{margin:0;color:var(--muted);line-height:1.7}.badge{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(79,140,255,.08);font-size:12px;letter-spacing:.05em;text-transform:uppercase}.button{display:inline-flex;align-items:center;justify-content:center;padding:11px 16px;border-radius:14px;background:linear-gradient(180deg,#4f8cff,#2563eb);border:1px solid #4f8cff;color:#fff;text-decoration:none;font-weight:700;box-shadow:0 12px 28px rgba(37,99,235,.35)}.button.secondary{background:#0f203c;border-color:#35507e;box-shadow:none}.steps{display:grid;gap:12px}.step{display:grid;grid-template-columns:40px 1fr;gap:14px;align-items:start;padding:14px;border-radius:16px;background:rgba(7,17,31,.65);border:1px solid rgba(43,66,104,.6)}.step .n{display:grid;place-items:center;width:40px;height:40px;border-radius:14px;background:linear-gradient(180deg,#4f8cff,#265fd8);font-weight:800}.table-wrap{overflow:auto;border-radius:18px;border:1px solid rgba(43,66,104,.6);margin-top:12px}table{width:100%;border-collapse:collapse;min-width:760px;background:rgba(7,17,31,.5)}th,td{padding:13px 14px;text-align:left;border-bottom:1px solid rgba(43,66,104,.55)}th{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:#a7b8d6;background:rgba(7,17,31,.9)}.alert{padding:14px 16px;border-radius:16px;margin-top:14px}.ok{background:rgba(22,163,74,.16);border:1px solid rgba(22,163,74,.35)}.err{background:rgba(220,38,38,.16);border:1px solid rgba(220,38,38,.35)}.info{background:rgba(79,140,255,.16);border:1px solid rgba(79,140,255,.35)}.form{display:grid;gap:14px}.row{display:grid;gap:6px}.split{display:grid;grid-template-columns:1.1fr .9fr;gap:18px;margin-top:20px}input,textarea{width:100%;padding:13px 14px;border-radius:14px;border:1px solid #35507e;background:#06101f;color:var(--text);font:inherit}.footer{padding:26px 0;color:var(--muted);font-size:13px}@media (max-width:900px){.split{grid-template-columns:1fr}.hero h1{font-size:28px}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">GPT OIDC</div>
+      <div class="nav">
+        <a href="#">总览</a>
+        <a href="#">安装</a>
+        <a href="#">管理后台</a>
+        <a href="#">SSO 登录</a>
+        <a href="#">OIDC 流程</a>
+      </div>
+    </div>
+
+    <section class="hero">
+      <span class="badge">独立 HTML 预览</span>
+      <h1>ChatGPT Business OIDC 管理界面预览</h1>
+      <p>这是一个不依赖 PHP 的纯 HTML 预览页，用来查看安装、发卡、员工卡密直登、邮箱前缀校验、OpenAI 跳转和后台管理的整体视觉风格。真实系统页面已经在 PHP 路由里实现，这个文件只是单独给你本地直接看 UI。</p>
+    </section>
+
+    <div class="grid">
+      <section class="card">
+        <h3>安装向导</h3>
+        <p>真实项目中已提供 `/install` 页面。这里展示它的大致样式。</p>
+        <div class="form">
+          <div class="row"><label>应用地址</label><input value="https://sso.example.com"></div>
+          <div class="row"><label>允许的邮箱后缀</label><input value="example.com, example.org"></div>
+          <div class="row"><label>数据库名</label><input value="gptoidc"></div>
+          <div class="row"><label>OpenAI Client ID</label><input value="chatgpt-business-client"></div>
+          <a class="button" href="#">立即安装</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>状态提示</h3>
+        <div class="alert ok">安装成功：配置、数据库、密钥和首个管理员已创建。</div>
+          <div class="alert info">提示：Business SSO 仅覆盖 ChatGPT，不覆盖 API Platform。</div>
+          <div class="alert err">错误：OpenAI Client Secret 未配置，OIDC 联调前请先补齐。</div>
+      </section>
+
+      <section class="card">
+        <h3>OIDC 流程</h3>
+        <div class="steps">
+          <div class="step"><div class="n">1</div><div>用户在 ChatGPT Business 输入公司邮箱</div></div>
+          <div class="step"><div class="n">2</div><div>OpenAI 跳转到你的 `/authorize`</div></div>
+          <div class="step"><div class="n">3</div><div>用户在本地输入邮箱前缀和卡密，首次使用时再补姓名绑定</div></div>
+          <div class="step"><div class="n">4</div><div>浏览器桥接页返回 OpenAI，OpenAI 后台调用 `/token` 兑换 code</div></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="split">
+      <section class="card">
+        <h3>卡密后台预览</h3>
+        <a class="button" href="#">生成批次</a>
+        <div class="table-wrap">
+          <table>
+            <tr><th>ID</th><th>批次</th><th>掩码卡密</th><th>状态</th><th>操作</th></tr>
+            <tr><td>101</td><td>B20260612A1</td><td>ABCD****-****-****9XYZ</td><td>未使用</td><td><a class="button secondary" href="#">导出批次</a></td></tr>
+            <tr><td>102</td><td>B20260612A1</td><td>EFGH****-****-****7QWE</td><td>已绑定</td><td>-</td></tr>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>单页 SSO 卡密登录预览</h3>
+        <div class="form">
+          <div class="row"><label>邮箱前缀</label><input value="alice"></div>
+          <div class="row"><label>邮箱后缀</label><input value="example.com"></div>
+          <div class="row"><label>卡密</label><input value="AB12CD-EF34GH-IJ56KL-MN78OP"></div>
+          <div class="row"><label>显示名（可选）</label><input value="Alice Zhang"></div>
+          <a class="button" href="#">继续</a>
+        </div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:20px">
+      <h3>OpenAI 回跳桥接页预览</h3>
+      <p>真实项目中，用户同意登录后会看到一个自动返回 OpenAI 的桥接页，页面会说明当前登录员工、目标 Client 和后台 code 兑换行为。</p>
+      <div class="alert info">当前用户：alice@example.com</div>
+      <div class="alert info">OIDC 客户端：chatgpt-business-client</div>
+      <div class="alert info">下一步：浏览器带授权码跳回 OpenAI，随后 OpenAI 在后台调用 /token 完成兑换</div>
+      <a class="button" href="#">立即继续</a>
+    </section>
+
+    <div class="footer">这个文件只是独立本地预览，真实可交互界面请访问 PHP 运行中的页面。</div>
+  </div>
+</body>
+</html>

@@ -19,6 +19,7 @@ from newtoken.webui.acc import (
     load_acc_members,
     parse_acc_import_payload,
 )
+from newtoken.webui.auto import run_auto_cycle
 from newtoken.webui.config import (
     AUTO_MAINTENANCE_TASK_LABEL,
     AUTO_POLICY_DEFAULT_INTERVAL_SECONDS,
@@ -252,4 +253,6 @@ def start_named_task(state: WebState, payload: dict[str, Any]) -> str:
             state,
             str(payload.get("payload_text") or ""),
         )
+    if action == "auto_maintenance":
+        return state.tasks.create(action, run_auto_cycle, state)
     raise ValueError("未知任务")
