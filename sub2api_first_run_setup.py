@@ -415,5 +415,4 @@ def prepare_first_run_environment(module_file: str | Path) -> dict[str, str]:
     root = tk.Tk()
     dialog = FirstRunSetupDialog(root, env_path, values, use_root_window=True)
     result = dialog.show()
-    root.destroy()
     return result
