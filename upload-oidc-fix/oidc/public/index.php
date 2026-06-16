@@ -20,43 +20,38 @@ function app_parse_csvish($value)
 function app_build_config_from_request(array $source, array $existing = [])
 {
     $appUrl = rtrim(trim((string) $source['app_url']), '/');
+    $domains = app_parse_csvish(isset($source['allowed_email_domains']) ? $source['allowed_email_domains'] : '');
+    $redirects = app_parse_csvish(isset($source['oidc_redirect_uris']) ? $source['oidc_redirect_uris'] : '');
 
     return [
-        'app_env' => $existing['app_env'] ?? 'production',
-        'app_debug' => $existing['app_debug'] ?? false,
+        'app_env' => isset($existing['app_env']) ? $existing['app_env'] : 'production',
+        'app_debug' => isset($existing['app_debug']) ? $existing['app_debug'] : false,
         'app_url' => $appUrl,
-        'app_name' => $existing['app_name'] ?? 'GPT OIDC',
-        'app_key' => $existing['app_key'] ?? bin2hex(random_bytes(32)),
-        'app_pepper' => $existing['app_pepper'] ?? bin2hex(random_bytes(32)),
-        'cards_api_key' => app_pick_key($source['cards_api_key'] ?? '', $existing['cards_api_key'] ?? ($existing['api_key'] ?? '')),
-        'clients_admin_api_key' => app_pick_key($source['clients_admin_api_key'] ?? '', $existing['clients_admin_api_key'] ?? ''),
-        'clients_admin_ip_allowlist' => $existing['clients_admin_ip_allowlist'] ?? [],
-        'clients_secret_reveal_enabled' => $existing['clients_secret_reveal_enabled'] ?? false,
+        'app_name' => isset($existing['app_name']) ? $existing['app_name'] : 'GPT OIDC',
+        'app_key' => isset($existing['app_key']) ? $existing['app_key'] : bin2hex(random_bytes(32)),
+        'app_pepper' => isset($existing['app_pepper']) ? $existing['app_pepper'] : bin2hex(random_bytes(32)),
+        'api_key' => trim((string) (isset($source['api_key']) ? $source['api_key'] : '')) !== ''
+            ? trim((string) $source['api_key'])
+            : (isset($existing['api_key']) && trim((string) $existing['api_key']) !== ''
+                ? trim((string) $existing['api_key'])
+                : bin2hex(random_bytes(32))),
         'db_host' => trim((string) $source['db_host']),
         'db_port' => (int) $source['db_port'],
         'db_name' => trim((string) $source['db_name']),
         'db_user' => trim((string) $source['db_user']),
         'db_pass' => (string) $source['db_pass'],
-        'session_name' => $existing['session_name'] ?? 'GPTOIDCSESSID',
+        'session_name' => isset($existing['session_name']) ? $existing['session_name'] : 'GPTOIDCSESSID',
+        'allowed_email_domains' => $domains,
         'oidc_issuer' => !empty($source['oidc_issuer']) ? rtrim(trim((string) $source['oidc_issuer']), '/') : $appUrl,
+        'oidc_client_id' => trim((string) $source['oidc_client_id']),
+        'oidc_client_secret' => trim((string) $source['oidc_client_secret']),
+        'oidc_allowed_redirect_uris' => $redirects ?: ['https://chatgpt.com/'],
         'oidc_access_token_ttl' => !empty($source['oidc_access_token_ttl']) ? (int) $source['oidc_access_token_ttl'] : 600,
         'oidc_id_token_ttl' => !empty($source['oidc_id_token_ttl']) ? (int) $source['oidc_id_token_ttl'] : 600,
         'oidc_auth_code_ttl' => !empty($source['oidc_auth_code_ttl']) ? (int) $source['oidc_auth_code_ttl'] : 90,
-        'jwt_private_key_path' => $existing['jwt_private_key_path'] ?? dirname(__DIR__) . '/storage/keys/private.pem',
-        'jwt_public_key_path' => $existing['jwt_public_key_path'] ?? dirname(__DIR__) . '/storage/keys/public.pem',
+        'jwt_private_key_path' => isset($existing['jwt_private_key_path']) ? $existing['jwt_private_key_path'] : dirname(__DIR__) . '/storage/keys/private.pem',
+        'jwt_public_key_path' => isset($existing['jwt_public_key_path']) ? $existing['jwt_public_key_path'] : dirname(__DIR__) . '/storage/keys/public.pem',
     ];
-}
-
-function app_pick_key($provided, $existing)
-{
-    $provided = trim((string) $provided);
-    if ($provided !== '') {
-        return $provided;
-    }
-    if (trim((string) $existing) !== '') {
-        return (string) $existing;
-    }
-    return bin2hex(random_bytes(32));
 }
 
 function app_validate_install_payload(array $source)
@@ -64,9 +59,15 @@ function app_validate_install_payload(array $source)
     if (trim((string) $source['app_url']) === '' || trim((string) $source['db_name']) === '' || trim((string) $source['db_user']) === '' || trim((string) $source['admin_username']) === '' || trim((string) $source['admin_email']) === '' || (string) $source['admin_password'] === '') {
         throw new RuntimeException('请填写所有必填安装项。');
     }
+
+    if (empty(app_parse_csvish(isset($source['allowed_email_domains']) ? $source['allowed_email_domains'] : ''))) {
+        throw new RuntimeException('至少要填写一个允许登录的邮箱后缀。');
+    }
+
     if (!filter_var((string) $source['admin_email'], FILTER_VALIDATE_EMAIL)) {
         throw new RuntimeException('管理员邮箱格式不正确。');
     }
+
     if (strlen((string) $source['admin_password']) < 10) {
         throw new RuntimeException('管理员密码至少需要 10 位。');
     }
@@ -76,6 +77,14 @@ function app_validate_config_payload(array $config)
 {
     if (trim((string) $config['app_url']) === '' || trim((string) $config['oidc_issuer']) === '') {
         throw new RuntimeException('应用地址和 OIDC Issuer 不能为空。');
+    }
+
+    if (empty($config['allowed_email_domains'])) {
+        throw new RuntimeException('至少要配置一个允许登录的邮箱后缀。');
+    }
+
+    if (empty($config['oidc_allowed_redirect_uris'])) {
+        throw new RuntimeException('至少要配置一个允许的回调地址。');
     }
 }
 
@@ -229,10 +238,6 @@ if ($path === '/userinfo') {
 if ($path === '/api/status') { app_api_status(); }
 if ($path === '/api/cards/generate' && app_method() === 'POST') { app_api_cards_generate(); }
 if ($path === '/api/cards/lookup' && app_method() === 'POST') { app_api_card_lookup(); }
-if ($path === '/api/clients' && app_method() === 'POST') { app_api_clients_create(); }
-if ($path === '/api/clients' && app_method() === 'GET') { app_api_clients_list(); }
-if (preg_match('#^/api/clients/([A-Za-z0-9_]+)$#', $path, $m) && app_method() === 'GET') { app_api_clients_get($m[1]); }
-if (preg_match('#^/api/clients/([A-Za-z0-9_]+)$#', $path, $m) && app_method() === 'PATCH') { app_api_clients_update($m[1]); }
 
 if ($path === '/') {
     $lookup = [];
@@ -280,12 +285,14 @@ if ($path === '/login') {
 }
 
 if ($path === '/sso') {
-    $pending = app_oidc_pending_authorize();
-    $hasPending = $pending !== null;
-    $allowedDomains = ($hasPending && !empty($pending['allowed_domains'])) ? array_values((array) $pending['allowed_domains']) : [];
     $hintEmail = app_login_hint_email();
     list($hintPrefix, $hintDomain) = app_split_email_parts($hintEmail);
+    $allowedDomains = (array) app_config('allowed_email_domains', []);
     $userRateBucket = 'user_login_' . app_ip();
+
+    if ($hintDomain && !in_array($hintDomain, $allowedDomains, true)) {
+        app_render_page('SSO 登录错误', '<section class="hero"><h1>邮箱后缀不受支持</h1><p>OpenAI 传来的邮箱后缀不在当前系统的受控范围内。请在后台添加允许的后缀，或使用受控邮箱重新发起登录。</p></section>', ['status' => 400]);
+    }
 
     if (app_is_post()) {
         if (!app_validate_csrf_token('user_login', app_post('csrf_token'))) {
@@ -299,18 +306,11 @@ if ($path === '/sso') {
 
         $plainCard = app_normalize_card_value(app_post('card_key'));
         $fullName = app_post('full_name');
-        $emailPrefix = strtolower(trim((string) app_post('email_prefix')));
-        $emailDomainInput = strtolower(trim((string) app_post('email_domain')));
-        $loginEmail = $emailPrefix . '@' . $emailDomainInput;
-
-        if ($emailPrefix === '' || $emailDomainInput === '' || !filter_var($loginEmail, FILTER_VALIDATE_EMAIL)) {
+        try {
+            $loginEmail = app_build_login_email_from_request();
+        } catch (Exception $e) {
             app_rate_limit_record($userRateBucket, 300);
-            app_flash_set('error', '邮箱前缀和后缀不能为空，且需合法。');
-            app_redirect('/sso');
-        }
-        if ($hintEmail !== '' && !hash_equals(strtolower($hintEmail), strtolower($loginEmail))) {
-            app_rate_limit_record($userRateBucket, 300);
-            app_flash_set('error', '邮箱必须与 OpenAI 登录时输入的邮箱一致。');
+            app_flash_set('error', $e->getMessage());
             app_redirect('/sso');
         }
 
@@ -325,15 +325,10 @@ if ($path === '/sso') {
         }
 
         $user = app_user_for_card($card);
-        if ($user) {
+        if ($user && $user['status'] === 'active') {
             if (!hash_equals(strtolower($user['email']), strtolower($loginEmail))) {
                 app_rate_limit_record($userRateBucket, 300);
-                app_flash_set('error', '邮箱与这张卡绑定的账号不一致。');
-                app_redirect('/sso');
-            }
-            if ($user['status'] !== 'active') {
-                app_rate_limit_record($userRateBucket, 300);
-                app_flash_set('error', '这张卡绑定的账号已被禁用。');
+                app_flash_set('error', '邮箱前缀与这张卡绑定的账号不一致。');
                 app_redirect('/sso');
             }
             app_touch_user_login($user['id']);
@@ -345,15 +340,14 @@ if ($path === '/sso') {
             app_redirect($redirect);
         }
 
-        // 卡未绑定 → 首次激活，必须有 pending client 上下文（审查档 2）
-        if (!$hasPending) {
+        if ($user && $user['status'] !== 'active') {
             app_rate_limit_record($userRateBucket, 300);
-            app_flash_set('error', '这张卡尚未激活，请从 ChatGPT 发起登录以完成首次绑定。');
+            app_flash_set('error', '这张卡绑定的账号已被禁用。');
             app_redirect('/sso');
         }
+
         try {
-            $originClientId = isset($pending['client_id']) ? (string) $pending['client_id'] : null;
-            $user = app_activate_user($plainCard, $loginEmail, $fullName, $allowedDomains, $originClientId);
+            $user = app_activate_user($plainCard, $loginEmail, $fullName);
         } catch (Exception $e) {
             app_rate_limit_record($userRateBucket, 300);
             app_flash_set('error', $e->getMessage());
@@ -369,23 +363,18 @@ if ($path === '/sso') {
         app_redirect($redirect);
     }
 
-    if ($hasPending && !empty($allowedDomains)) {
-        if ($hintDomain && in_array(app_normalize_domain($hintDomain), $allowedDomains, true)) {
-            $suffixField = '<div class="field"><label>邮箱后缀</label><input type="text" value="' . app_h($hintDomain) . '" readonly><input type="hidden" name="email_domain" value="' . app_h($hintDomain) . '"></div>';
-        } else {
-            $options = '';
-            foreach ($allowedDomains as $domain) {
-                $options .= '<option value="' . app_h($domain) . '">' . app_h($domain) . '</option>';
-            }
-            $suffixField = '<div class="field"><label>邮箱后缀</label><select name="email_domain" required>' . $options . '</select></div>';
-        }
-        $intro = '用户先在 ChatGPT 里输入完整受控邮箱，OpenAI 跳转到这里后，再输入卡密和邮箱前缀即可。新卡会在第一次使用时自动绑定。';
+    $suffixField = '';
+    if ($hintDomain && in_array($hintDomain, $allowedDomains, true)) {
+        $suffixField = '<div class="field"><label>邮箱后缀</label><input type="text" value="' . app_h($hintDomain) . '" readonly><input type="hidden" name="email_domain" value="' . app_h($hintDomain) . '"></div>';
     } else {
-        $suffixField = '<div class="field"><label>邮箱后缀</label><input type="text" name="email_domain" placeholder="example.com" required></div>';
-        $intro = '直接访问只能用<strong>已激活</strong>的卡密登录。新卡首次绑定请从 ChatGPT 发起。';
+        $options = '';
+        foreach ($allowedDomains as $domain) {
+            $options .= '<option value="' . app_h($domain) . '">' . app_h($domain) . '</option>';
+        }
+        $suffixField = '<div class="field"><label>邮箱后缀</label><select name="email_domain" required>' . $options . '</select></div>';
     }
     $prefixValue = $hintPrefix ? ' value="' . app_h($hintPrefix) . '"' : '';
-    $body = '<section class="hero"><span class="pill">单页 SSO 卡密登录</span><h1>使用卡密和邮箱前缀登录</h1><p>' . $intro . '</p></section><section class="split"><div class="card"><div class="section-title"><h3>SSO 卡密登录</h3></div><form method="post" class="stack"><input type="hidden" name="csrf_token" value="' . app_h(app_issue_csrf_token('user_login')) . '"><div class="form-grid"><div class="field"><label>邮箱前缀</label><input type="text" name="email_prefix"' . $prefixValue . ' required></div>' . $suffixField . '</div><div class="field"><label>卡密</label><input class="mono" type="text" name="card_key" required></div><div class="field"><label>显示名（可选）</label><input type="text" name="full_name"></div><div class="actions"><button type="submit">继续</button></div></form></div><div class="card"><div class="section-title"><h3>接下来会发生什么</h3></div><div class="steps"><div class="step"><div>如果卡密已经绑定，邮箱前缀必须与绑定账号一致。</div></div><div class="step"><div>如果是新卡，需从 ChatGPT 发起登录以完成首次绑定。</div></div><div class="step"><div>如果这次登录是从 OpenAI 发起的，系统会自动继续走 OIDC 回跳。</div></div></div></div></section>';
+    $body = '<section class="hero"><span class="pill">单页 SSO 卡密登录</span><h1>使用卡密和邮箱前缀登录</h1><p>用户先在 ChatGPT 里输入完整受控邮箱，OpenAI 跳转到这里后，再输入卡密和邮箱前缀即可。如果是新卡，系统会在第一次使用时自动完成绑定。</p></section><section class="split"><div class="card"><div class="section-title"><h3>SSO 卡密登录</h3></div><form method="post" class="stack"><input type="hidden" name="csrf_token" value="' . app_h(app_issue_csrf_token('user_login')) . '"><div class="form-grid"><div class="field"><label>邮箱前缀</label><input type="text" name="email_prefix"' . $prefixValue . ' required></div>' . $suffixField . '</div><div class="field"><label>卡密</label><input class="mono" type="text" name="card_key" required></div><div class="field"><label>显示名（可选）</label><input type="text" name="full_name"></div><div class="actions"><button type="submit">继续</button></div></form></div><div class="card"><div class="section-title"><h3>接下来会发生什么</h3></div><div class="steps"><div class="step"><div>如果卡密已经绑定，邮箱前缀必须与绑定账号一致。</div></div><div class="step"><div>如果是新卡，系统会立即绑定到当前输入的邮箱。</div></div><div class="step"><div>如果这次登录是从 OpenAI 发起的，系统会自动继续走 OIDC 回跳。</div></div></div></div></section>';
     app_render_page('SSO 卡密登录', $body);
 }
 
@@ -587,87 +576,6 @@ if ($path === '/admin/settings/save' && app_is_post()) {
     app_redirect('/admin');
 }
 
-if ($path === '/admin/clients') {
-    $admin = app_require_admin();
-    $created = $_SESSION['__client_created'] ?? null;
-    unset($_SESSION['__client_created']);
-    $revealed = $_SESSION['__client_revealed'] ?? null;
-    unset($_SESSION['__client_revealed']);
-    app_render_page('母号管理', app_admin_clients_html(app_admin_clients(), $created, $revealed, app_issue_csrf_token('admin_clients')));
-}
-
-if ($path === '/admin/clients/create' && app_is_post()) {
-    $admin = app_require_admin();
-    if (!app_validate_csrf_token('admin_clients', app_post('csrf_token'))) { app_flash_set('error', 'CSRF 校验失败。'); app_redirect('/admin/clients'); }
-    try {
-        $res = app_client_create([
-            'name' => app_post('name'),
-            'redirect_uris' => app_parse_csvish(app_post('redirect_uris')),
-            'allowed_domains' => app_parse_csvish(app_post('allowed_domains')),
-            'note' => app_post('note'),
-        ], (int) $admin['id']);
-        $_SESSION['__client_created'] = $res;
-        app_flash_set('success', '母号已创建：' . $res['client_id'] . '。请立刻复制 Client Secret，仅展示一次。');
-    } catch (Exception $e) {
-        app_flash_set('error', $e->getMessage());
-    }
-    app_redirect('/admin/clients');
-}
-
-if ($path === '/admin/clients/update' && app_is_post()) {
-    $admin = app_require_admin();
-    if (!app_validate_csrf_token('admin_clients', app_post('csrf_token'))) { app_flash_set('error', 'CSRF 校验失败。'); app_redirect('/admin/clients'); }
-    try {
-        app_client_update(app_post('client_id'), [
-            'name' => app_post('name'),
-            'redirect_uris' => app_parse_csvish(app_post('redirect_uris')),
-            'allowed_domains' => app_parse_csvish(app_post('allowed_domains')),
-        ], (int) $admin['id']);
-        app_flash_set('success', '母号已更新。');
-    } catch (Exception $e) {
-        app_flash_set('error', $e->getMessage());
-    }
-    app_redirect('/admin/clients');
-}
-
-if ($path === '/admin/clients/status' && app_is_post()) {
-    $admin = app_require_admin();
-    if (!app_validate_csrf_token('admin_clients', app_post('csrf_token'))) { app_flash_set('error', 'CSRF 校验失败。'); app_redirect('/admin/clients'); }
-    try {
-        app_client_update(app_post('client_id'), ['status' => app_post('status') === 'disabled' ? 'disabled' : 'active'], (int) $admin['id']);
-        app_flash_set('success', '母号状态已更新。');
-    } catch (Exception $e) {
-        app_flash_set('error', $e->getMessage());
-    }
-    app_redirect('/admin/clients');
-}
-
-if ($path === '/admin/clients/rotate' && app_is_post()) {
-    $admin = app_require_admin();
-    if (!app_validate_csrf_token('admin_clients', app_post('csrf_token'))) { app_flash_set('error', 'CSRF 校验失败。'); app_redirect('/admin/clients'); }
-    try {
-        $secret = app_client_rotate_secret(app_post('client_id'), (int) $admin['id']);
-        $_SESSION['__client_revealed'] = ['client_id' => app_post('client_id'), 'client_secret' => $secret];
-        app_flash_set('success', '已轮换 Secret，请立刻复制。');
-    } catch (Exception $e) {
-        app_flash_set('error', $e->getMessage());
-    }
-    app_redirect('/admin/clients');
-}
-
-if ($path === '/admin/clients/reveal' && app_is_post()) {
-    $admin = app_require_admin();
-    if (!app_validate_csrf_token('admin_clients', app_post('csrf_token'))) { app_flash_set('error', 'CSRF 校验失败。'); app_redirect('/admin/clients'); }
-    try {
-        $secret = app_client_reveal_secret(app_post('client_id'));
-        app_audit('admin', (int) $admin['id'], 'client_secret_revealed', 'client', app_post('client_id'), ['via' => 'admin']);
-        $_SESSION['__client_revealed'] = ['client_id' => app_post('client_id'), 'client_secret' => $secret];
-    } catch (Exception $e) {
-        app_flash_set('error', $e->getMessage());
-    }
-    app_redirect('/admin/clients');
-}
-
 if ($path === '/admin') {
     $admin = app_require_admin();
     $batchRows = app_admin_batches();
@@ -679,7 +587,7 @@ if ($path === '/admin') {
     $cardLookupResult = app_query('card_lookup') === '1' && $cardLookupInput !== '' ? app_admin_find_card_by_plain($cardLookupInput) : null;
     $unusedCount = app_db_one("SELECT COUNT(*) AS c FROM card_keys WHERE status = 'unused'");
     $activeUsers = app_db_one("SELECT COUNT(*) AS c FROM users WHERE status = 'active'");
-    $body = '<section class="hero"><span class="pill">管理工作区</span><h1>管理后台</h1><p>当前登录管理员：<strong>' . app_h($admin['username']) . '</strong>。用户侧现在是纯卡密登录，卡密本身就是用户凭证。</p><div class="actions" style="margin-top:16px"><a class="button-link inline secondary" href="/admin/clients">母号管理</a><form method="post" action="/admin/logout"><input type="hidden" name="csrf_token" value="' . app_h(app_issue_csrf_token('admin_logout')) . '"><button class="inline secondary" type="submit">退出后台</button></form></div></section>';
+    $body = '<section class="hero"><span class="pill">管理工作区</span><h1>管理后台</h1><p>当前登录管理员：<strong>' . app_h($admin['username']) . '</strong>。用户侧现在是纯卡密登录，卡密本身就是用户凭证。</p><div class="actions" style="margin-top:16px"><form method="post" action="/admin/logout"><input type="hidden" name="csrf_token" value="' . app_h(app_issue_csrf_token('admin_logout')) . '"><button class="inline secondary" type="submit">退出后台</button></form></div></section>';
     $body .= '<section class="grid"><div class="card"><div class="small">未绑定卡密</div><div class="metric">' . app_h(isset($unusedCount['c']) ? $unusedCount['c'] : 0) . '</div></div><div class="card"><div class="small">启用用户</div><div class="metric">' . app_h(isset($activeUsers['c']) ? $activeUsers['c'] : 0) . '</div></div><div class="card"><div class="small">OIDC 标识地址</div><div class="metric mono" style="font-size:18px">' . app_h($config['oidc_issuer']) . '</div></div></section>';
     $body .= '<section class="split"><div>';
     $body .= '<div class="card"><div class="section-title"><h3>创建卡密批次</h3><span class="badge">一次性导出</span></div><form method="post" action="/admin/cards/generate" class="stack"><input type="hidden" name="csrf_token" value="' . app_h(app_issue_csrf_token('admin_cards')) . '"><div class="form-grid"><div class="field"><label>数量</label><input type="number" name="count" min="1" max="500" value="10" required></div><div class="field"><label>有效天数（0 表示不过期）</label><input type="number" name="expires_in_days" min="0" value="30"></div></div><div class="field"><label>批次备注</label><textarea name="note" placeholder="例如：2026-Q2 社区发卡"></textarea></div><div class="actions"><button type="submit">生成批次</button></div></form></div>';
@@ -748,10 +656,6 @@ if ($path === '/authorize') {
             if (!$params) {
                 throw new RuntimeException('缺少待处理的授权请求。');
             }
-            $resumeClient = app_client_find($params['client_id'] ?? '');
-            if (!$resumeClient || $resumeClient['status'] !== 'active') {
-                throw new RuntimeException('client_id 无效。');
-            }
         } else {
             $params = [
                 'client_id' => app_query('client_id'),
@@ -765,7 +669,6 @@ if ($path === '/authorize') {
                 'login_hint' => app_query('login_hint'),
             ];
             app_oidc_validate_authorize_request($params);
-            $params['allowed_domains'] = app_client_domains($params['client_id']);
             app_oidc_store_pending_authorize($params);
         }
     } catch (Exception $e) {

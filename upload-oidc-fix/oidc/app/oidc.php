@@ -79,14 +79,14 @@ function app_oidc_generate_keys($privatePath, $publicPath)
 
 function app_oidc_validate_authorize_request(array $params)
 {
-    $client = app_client_find($params['client_id'] ?? '');
-    if (!$client || $client['status'] !== 'active') {
+    $allowedRedirects = (array) app_config('oidc_allowed_redirect_uris', []);
+    if (($params['client_id'] ?? '') !== app_config('oidc_client_id')) {
         throw new RuntimeException('client_id 无效。');
     }
     if (($params['response_type'] ?? '') !== 'code') {
         throw new RuntimeException('当前只支持 response_type=code。');
     }
-    if (empty($params['redirect_uri']) || !app_client_redirect_allowed($client, $params['redirect_uri'])) {
+    if (empty($params['redirect_uri']) || !in_array($params['redirect_uri'], $allowedRedirects, true)) {
         throw new RuntimeException('redirect_uri 无效。');
     }
     if (empty($params['scope']) || strpos($params['scope'], 'openid') === false) {
@@ -95,8 +95,10 @@ function app_oidc_validate_authorize_request(array $params)
     if (empty($params['state']) || empty($params['nonce'])) {
         throw new RuntimeException('state 和 nonce 都是必填项。');
     }
+
     $hasCodeChallenge = !empty($params['code_challenge']);
     $hasCodeChallengeMethod = !empty($params['code_challenge_method']);
+
     if ($hasCodeChallenge || $hasCodeChallengeMethod) {
         if (!$hasCodeChallenge || ($params['code_challenge_method'] ?? '') !== 'S256') {
             throw new RuntimeException('如果启用 PKCE，则必须使用 S256。');
@@ -165,7 +167,7 @@ function app_oidc_issue_code(array $user, array $params)
 
 function app_oidc_client_authenticated($clientId, $clientSecret)
 {
-    return app_client_authenticate((string) $clientId, (string) $clientSecret);
+    return hash_equals((string) app_config('oidc_client_id', ''), (string) $clientId) && hash_equals((string) app_config('oidc_client_secret', ''), (string) $clientSecret);
 }
 
 function app_oidc_parse_basic_auth()
