@@ -27,6 +27,11 @@ from newtoken.webui.scheduler import WebScheduler
 from newtoken.webui.utils import html_escape
 from newtoken.webui.utils import json_safe
 
+from newtoken.common.logging_setup import get_logger, setup_logging
+
+logger = get_logger("webui.server")
+
+
 class WebUIHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the WebUI."""
 
@@ -37,7 +42,7 @@ class WebUIHandler(BaseHTTPRequestHandler):
         return self.server.state  # type: ignore[attr-defined]
 
     def log_message(self, fmt: str, *args) -> None:
-        print(f"[WEBUI] {self.address_string()} {fmt % args}")
+        logger.debug("%s %s", self.address_string(), fmt % args)
 
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
@@ -93,6 +98,7 @@ class WebUIHandler(BaseHTTPRequestHandler):
             result = dispatch_api(path, payload, self.state)
             self._send_json({"ok": True, "result": json_safe(result)})
         except Exception as exc:  # noqa: BLE001
+            logger.exception("API 处理失败 path=%s", path)
             self._send_json({"ok": False, "error": str(exc)}, status=400)
 
     def _read_json_body(self) -> dict[str, Any]:
@@ -207,20 +213,26 @@ def main(argv: list[str] | None = None) -> int:
     env_path = Path(args.env).resolve() if args.env else ENV_PATH
     state = WebState(env_path)
     values = state.load_config()
+    setup_logging(
+        level=values.get("SUB2API_LOG_LEVEL"),
+        log_dir=values.get("SUB2API_LOG_DIR"),
+        max_bytes=values.get("SUB2API_LOG_MAX_BYTES"),
+        backup_count=values.get("SUB2API_LOG_BACKUP_COUNT"),
+    )
     host, port = resolve_server_bind(args, values)
     scheduler = WebScheduler(state)
     state.scheduler = scheduler
     server = Sub2APIWebServer((host, port), WebUIHandler, state)
-    print(f"Sub2API WebUI listening on http://{host}:{port}")
+    logger.info("Sub2API WebUI 监听 http://%s:%s", host, port)
     if values.get("SUB2API_OUTBOUND_PROXY_URL"):
-        print(f"Outbound proxy: {mask_proxy_url(values.get('SUB2API_OUTBOUND_PROXY_URL'))}")
+        logger.info("出站代理 %s", mask_proxy_url(values.get("SUB2API_OUTBOUND_PROXY_URL")))
     if not state.auth_secret:
-        print("Warning: SUB2API_WEB_SECRET is empty; WebUI has no password.")
+        logger.warning("SUB2API_WEB_SECRET 为空；WebUI 无密码保护。")
     scheduler.start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("Stopping Sub2API WebUI...")
+        logger.info("正在停止 Sub2API WebUI …")
     finally:
         scheduler.stop()
         server.server_close()
