@@ -6,6 +6,10 @@ from typing import Any
 
 from newtoken.webui.config import WebState
 
+from newtoken.common.logging_setup import get_logger
+
+logger = get_logger("webui.monitor")
+
 
 def evaluate_health(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Classify each remote account into alive/dead/low-quota/auth-error buckets.
@@ -68,4 +72,5 @@ def auto_offline_dead(
             "errors": [],
         }
     except Exception as exc:  # noqa: BLE001
+        logger.exception("auto_offline_dead 失败")
         return {"offlined": 0, "failed": len(target), "errors": [str(exc)]}

@@ -19,6 +19,10 @@ from newtoken.webui.config import (
 )
 from newtoken.webui.utils import parse_bool_text, parse_positive_int
 
+from newtoken.common.logging_setup import get_logger
+
+logger = get_logger("webui.scheduler")
+
 if TYPE_CHECKING:
     from newtoken.webui.config import WebState
 
@@ -162,6 +166,7 @@ class WebScheduler:
         now = time.time()
         missing = find_missing_policy_config(values)
         if missing:
+            logger.info("跳过自动策略：等待配置 %s", ", ".join(missing))
             self._update_status(
                 last_tick_at=now,
                 skipped_reason="等待配置：" + ", ".join(missing),
@@ -175,12 +180,14 @@ class WebScheduler:
                 self.state,
             )
         except Exception as exc:  # noqa: BLE001
+            logger.exception("提交策略任务失败")
             self._update_status(
                 last_tick_at=now,
                 last_error=str(exc),
                 skipped_reason="提交策略任务失败",
             )
             return
+        logger.info("已提交自动维护任务 task_id=%s", task_id)
         self._update_status(
             last_tick_at=now,
             last_task_id=task_id,
