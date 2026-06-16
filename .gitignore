@@ -28,3 +28,8 @@ oidc/storage/ratelimits/*
 !oidc/storage/keys/.gitkeep
 !oidc/storage/exports/.gitkeep
 !oidc/storage/ratelimits/.gitkeep
+
+# 母号接入记录（含 client_secret，勿提交）
+docs/oidc/mother-accounts/
+# OIDC 服务交付凭证（含密码/key，勿提交）
+docs/oidc/_credentials.md
