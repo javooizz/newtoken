@@ -16,6 +16,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from newtoken.common.logging_setup import get_logger, log_run_context
 from newtoken.webui.acc import enforce_acc_low_quota_policy
 from newtoken.webui.config import WebState
 from newtoken.webui.oidc_client import oidc_generate_cards
@@ -24,6 +25,8 @@ from newtoken.sub2api.remote import (
     import_to_sub2api_codex_session,
     scan_remote_accounts,
 )
+
+logger = get_logger("webui.auto")
 
 AUTO_CARD_DAYS = 30
 
@@ -60,122 +63,143 @@ def _auto_phase(label: str, start: float) -> dict[str, Any]:
 
 def run_auto_maintenance(state: WebState) -> dict[str, Any]:
     start = time.time()
-    report: dict[str, Any] = {
-        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start)),
-        "phases": [],
-        "errors": [],
-    }
+    run_id = f"auto{time.strftime('%H%M%S')}"
+    with log_run_context(run_id):
+        logger.info("自动维护开始 run_id=%s", run_id)
+        report: dict[str, Any] = {
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start)),
+            "phases": [],
+            "errors": [],
+        }
 
-    config = state.load_config()
-    auto_cfg = _read_auto_register_config(config)
-    email_domain = str(config.get("SUB2API_AUTO_REGISTER_DOMAIN") or config.get("CHATGPT_RANDOM_EMAIL_DOMAIN") or "").strip()
+        config = state.load_config()
+        auto_cfg = _read_auto_register_config(config)
+        email_domain = str(config.get("SUB2API_AUTO_REGISTER_DOMAIN") or config.get("CHATGPT_RANDOM_EMAIL_DOMAIN") or "").strip()
 
-    proxy_url = str(config.get("SUB2API_OUTBOUND_PROXY_URL") or "").strip()
+        proxy_url = str(config.get("SUB2API_OUTBOUND_PROXY_URL") or "").strip()
 
-    # ---- Phase 1: low-quota policy ----------------------------------------
-    try:
-        policy_result = enforce_acc_low_quota_policy(state)
-        report["phases"].append({**_auto_phase("seat_policy", start), "result": policy_result})
-    except Exception as exc:
-        report["phases"].append({**_auto_phase("seat_policy", start), "error": str(exc)})
-        report["errors"].append(f"seat_policy: {exc}")
+        # ---- Phase 1: low-quota policy ----------------------------------------
+        try:
+            policy_result = enforce_acc_low_quota_policy(state)
+            report["phases"].append({**_auto_phase("seat_policy", start), "result": policy_result})
+        except Exception as exc:
+            logger.exception("phase=seat_policy 失败")
+            report["phases"].append({**_auto_phase("seat_policy", start), "error": str(exc)})
+            report["errors"].append(f"seat_policy: {exc}")
 
-    # ---- Phase 2: scan remote pool ----------------------------------------
-    try:
-        remote_config = state.build_remote_config()
-        scan = scan_remote_accounts(remote_config)
-        state.last_remote_scan = scan
-        report["phases"].append({**_auto_phase("remote_scan", start), "result": {
-            "total": scan.get("total_count", 0),
-            "alive": scan.get("alive_count", 0),
-            "dead": scan.get("dead_count", 0),
-            "no_quota": scan.get("no_quota_count", 0),
-        }})
-    except Exception as exc:
-        report["phases"].append({**_auto_phase("remote_scan", start), "error": str(exc)})
-        report["errors"].append(f"remote_scan: {exc}")
-        return report
+        # ---- Phase 2: scan remote pool ----------------------------------------
+        try:
+            remote_config = state.build_remote_config()
+            scan = scan_remote_accounts(remote_config)
+            state.last_remote_scan = scan
+            report["phases"].append({**_auto_phase("remote_scan", start), "result": {
+                "total": scan.get("total_count", 0),
+                "alive": scan.get("alive_count", 0),
+                "dead": scan.get("dead_count", 0),
+                "no_quota": scan.get("no_quota_count", 0),
+            }})
+            logger.info("phase=remote_scan total=%s alive=%s dead=%s no_quota=%s",
+                        scan.get("total_count", 0), scan.get("alive_count", 0),
+                        scan.get("dead_count", 0), scan.get("no_quota_count", 0))
+        except Exception as exc:
+            logger.exception("phase=remote_scan 失败")
+            report["phases"].append({**_auto_phase("remote_scan", start), "error": str(exc)})
+            report["errors"].append(f"remote_scan: {exc}")
+            return report
 
-    # ---- Phase 3: check if pool needs replenishment -----------------------
-    alive = int(scan.get("alive_count", 0) or 0)
-    quota_ok = alive - int(scan.get("no_quota_count", 0) or 0)
-    report["pool_status"] = {"alive": alive, "quota_ok": quota_ok, "threshold": auto_cfg["threshold"]}
+        # ---- Phase 3: check if pool needs replenishment -----------------------
+        alive = int(scan.get("alive_count", 0) or 0)
+        quota_ok = alive - int(scan.get("no_quota_count", 0) or 0)
+        report["pool_status"] = {"alive": alive, "quota_ok": quota_ok, "threshold": auto_cfg["threshold"]}
 
-    if quota_ok >= auto_cfg["threshold"]:
-        report["phases"].append({**_auto_phase("replenish", start), "skipped": True,
-                                  "reason": f"quota_ok={quota_ok} >= threshold={auto_cfg['threshold']}"})
-        report["elapsed"] = round(time.time() - start, 2)
-        return report
-    if not auto_cfg["enabled"]:
-        report["phases"].append({**_auto_phase("register", start), "skipped": True,
-                                  "reason": "SUB2API_AUTO_REGISTER_ENABLED=false"})
-        report["elapsed"] = round(time.time() - start, 2)
-        return report
-    if not email_domain:
-        report["phases"].append({**_auto_phase("register", start), "error": "SUB2API_AUTO_REGISTER_DOMAIN / CHATGPT_RANDOM_EMAIL_DOMAIN not configured"})
-        report["errors"].append("register: SUB2API_AUTO_REGISTER_DOMAIN / CHATGPT_RANDOM_EMAIL_DOMAIN not configured")
-        report["elapsed"] = round(time.time() - start, 2)
-        return report
+        if quota_ok >= auto_cfg["threshold"]:
+            report["phases"].append({**_auto_phase("replenish", start), "skipped": True,
+                                      "reason": f"quota_ok={quota_ok} >= threshold={auto_cfg['threshold']}"})
+            report["elapsed"] = round(time.time() - start, 2)
+            logger.info("池充足，跳过补号 quota_ok=%s >= threshold=%s", quota_ok, auto_cfg["threshold"])
+            return report
+        if not auto_cfg["enabled"]:
+            report["phases"].append({**_auto_phase("register", start), "skipped": True,
+                                      "reason": "SUB2API_AUTO_REGISTER_ENABLED=false"})
+            report["elapsed"] = round(time.time() - start, 2)
+            logger.info("自动补号已关闭，跳过")
+            return report
+        if not email_domain:
+            report["phases"].append({**_auto_phase("register", start), "error": "SUB2API_AUTO_REGISTER_DOMAIN / CHATGPT_RANDOM_EMAIL_DOMAIN not configured"})
+            report["errors"].append("register: SUB2API_AUTO_REGISTER_DOMAIN / CHATGPT_RANDOM_EMAIL_DOMAIN not configured")
+            report["elapsed"] = round(time.time() - start, 2)
+            logger.warning("phase=register 缺少注册域名配置")
+            return report
 
-    # ---- Phase 4: register new accounts -----------------------------------
-    register_count = max(1, auto_cfg["count"] - quota_ok)
-    try:
-        register_results = register_batch(
-            register_count, email_domain=email_domain, proxy_url=proxy_url,
-            oidc_api_url=str(config.get("SUB2API_OIDC_API_URL") or "").strip(),
-            oidc_api_key=str(config.get("SUB2API_OIDC_API_KEY") or "").strip(),
-            account_id=str(config.get("OPENAI_ACCOUNT_ID") or "").strip(),
-            max_workers=1,
-        )
-        ok_results = [r for r in register_results if r.ok]
-        fail_results = [r for r in register_results if not r.ok]
-        report["phases"].append({**_auto_phase("register", start), "result": {
-            "requested": register_count, "ok": len(ok_results), "fail": len(fail_results),
-            "emails": [r.email for r in ok_results],
-            "errors": [{"email": r.email, "error": r.error} for r in fail_results],
-        }})
+        # ---- Phase 4: register new accounts -----------------------------------
+        register_count = max(1, auto_cfg["count"] - quota_ok)
+        logger.info("开始补号 count=%s", register_count)
+        try:
+            register_results = register_batch(
+                register_count, email_domain=email_domain, proxy_url=proxy_url,
+                oidc_api_url=str(config.get("SUB2API_OIDC_API_URL") or "").strip(),
+                oidc_api_key=str(config.get("SUB2API_OIDC_API_KEY") or "").strip(),
+                account_id=str(config.get("OPENAI_ACCOUNT_ID") or "").strip(),
+                max_workers=1, run_id=run_id,
+            )
+            ok_results = [r for r in register_results if r.ok]
+            fail_results = [r for r in register_results if not r.ok]
+            report["phases"].append({**_auto_phase("register", start), "result": {
+                "requested": register_count, "ok": len(ok_results), "fail": len(fail_results),
+                "emails": [r.email for r in ok_results],
+                "errors": [{"email": r.email, "error": r.error} for r in fail_results],
+            }})
+            logger.info("补号结果 ok=%s fail=%s", len(ok_results), len(fail_results))
 
-        if not ok_results:
-            report["errors"].append("registration: 0 accounts registered successfully")
+            if not ok_results:
+                report["errors"].append("registration: 0 accounts registered successfully")
+                report["elapsed"] = round(time.time() - start, 2)
+                return report
+
+        except Exception as exc:
+            logger.exception("phase=register 失败")
+            report["phases"].append({**_auto_phase("register", start), "error": str(exc)})
+            report["errors"].append(f"register: {exc}")
             report["elapsed"] = round(time.time() - start, 2)
             return report
 
-    except Exception as exc:
-        report["phases"].append({**_auto_phase("register", start), "error": str(exc)})
-        report["errors"].append(f"register: {exc}")
+        # ---- Phase 5: import to Sub2API ---------------------------------------
+        try:
+            import_payloads = [r.token_json for r in ok_results if r.token_json]
+            imported = 0
+            for payload in import_payloads:
+                try:
+                    import_to_sub2api_codex_session(remote_config, payload)
+                    imported += 1
+                except Exception as exc:
+                    logger.exception("phase=import 单条导入失败")
+                    report["phases"].append({**_auto_phase("import", start), "error": str(exc), "payload_preview": payload[:120]})
+            report["phases"].append({**_auto_phase("import", start), "result": {"imported": imported, "total": len(import_payloads)}})
+            logger.info("phase=import imported=%s/%s", imported, len(import_payloads))
+        except Exception as exc:
+            logger.exception("phase=import 失败")
+            report["phases"].append({**_auto_phase("import", start), "error": str(exc)})
+            report["errors"].append(f"import: {exc}")
+
+        # ---- Phase 6: generate OIDC cards -------------------------------------
+        try:
+            cards_needed = max(1, len(ok_results))
+            cards_result = oidc_generate_cards(cards_needed, AUTO_CARD_DAYS, "auto_maintenance", config=config)
+            if cards_result.get("ok"):
+                cards_list = cards_result.get("cards") or []
+                report["phases"].append({**_auto_phase("oidc_cards", start), "result": {
+                    "generated": len(cards_list), "batch_no": cards_result.get("batch_no", ""),
+                }})
+                logger.info("phase=oidc_cards generated=%s", len(cards_list))
+            else:
+                report["phases"].append({**_auto_phase("oidc_cards", start), "skipped": True,
+                                          "reason": cards_result.get("error", "unknown")})
+                logger.warning("phase=oidc_cards 跳过：%s", cards_result.get("error", "unknown"))
+        except Exception as exc:
+            logger.exception("phase=oidc_cards 失败")
+            report["phases"].append({**_auto_phase("oidc_cards", start), "error": str(exc)})
+            report["errors"].append(f"oidc_cards: {exc}")
+
         report["elapsed"] = round(time.time() - start, 2)
+        logger.info("自动维护完成 elapsed=%ss errors=%s", report["elapsed"], len(report["errors"]))
         return report
-
-    # ---- Phase 5: import to Sub2API ---------------------------------------
-    try:
-        import_payloads = [r.token_json for r in ok_results if r.token_json]
-        imported = 0
-        for payload in import_payloads:
-            try:
-                import_to_sub2api_codex_session(remote_config, payload)
-                imported += 1
-            except Exception as exc:
-                report["phases"].append({**_auto_phase("import", start), "error": str(exc), "payload_preview": payload[:120]})
-        report["phases"].append({**_auto_phase("import", start), "result": {"imported": imported, "total": len(import_payloads)}})
-    except Exception as exc:
-        report["phases"].append({**_auto_phase("import", start), "error": str(exc)})
-        report["errors"].append(f"import: {exc}")
-
-    # ---- Phase 6: generate OIDC cards -------------------------------------
-    try:
-        cards_needed = max(1, len(ok_results))
-        cards_result = oidc_generate_cards(cards_needed, AUTO_CARD_DAYS, "auto_maintenance", config=config)
-        if cards_result.get("ok"):
-            cards_list = cards_result.get("cards") or []
-            report["phases"].append({**_auto_phase("oidc_cards", start), "result": {
-                "generated": len(cards_list), "batch_no": cards_result.get("batch_no", ""),
-            }})
-        else:
-            report["phases"].append({**_auto_phase("oidc_cards", start), "skipped": True,
-                                      "reason": cards_result.get("error", "unknown")})
-    except Exception as exc:
-        report["phases"].append({**_auto_phase("oidc_cards", start), "error": str(exc)})
-        report["errors"].append(f"oidc_cards: {exc}")
-
-    report["elapsed"] = round(time.time() - start, 2)
-    return report
