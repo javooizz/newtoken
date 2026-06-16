@@ -8,6 +8,10 @@ import threading
 import time
 from typing import Any
 
+from newtoken.common.logging_setup import get_logger, log_run_context
+
+logger = get_logger("webui.tasks")
+
 MAX_WEB_TASK_WORKERS = 4
 
 
@@ -53,22 +57,26 @@ class WebTaskStore:
             with self._lock:
                 task["status"] = "running"
                 task["started_at"] = time.time()
-            try:
-                result = target(*args, **kwargs)
-            except Exception as exc:  # noqa: BLE001
+            with log_run_context(f"task-{task_id}"):
+                logger.info("任务开始 label=%s id=%s", normalized_label, task_id)
+                try:
+                    result = target(*args, **kwargs)
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("任务失败 label=%s id=%s", normalized_label, task_id)
+                    with self._lock:
+                        task["status"] = "error"
+                        task["error"] = str(exc)
+                        task["finished_at"] = time.time()
+                        self._active_by_label.pop(normalized_label, None)
+                        self._trim_locked()
+                    return
                 with self._lock:
-                    task["status"] = "error"
-                    task["error"] = str(exc)
+                    task["status"] = "done"
+                    task["result"] = result
                     task["finished_at"] = time.time()
                     self._active_by_label.pop(normalized_label, None)
                     self._trim_locked()
-                return
-            with self._lock:
-                task["status"] = "done"
-                task["result"] = result
-                task["finished_at"] = time.time()
-                self._active_by_label.pop(normalized_label, None)
-                self._trim_locked()
+                logger.info("任务完成 label=%s id=%s", normalized_label, task_id)
 
         self._executor.submit(runner)
         return task_id
