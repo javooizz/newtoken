@@ -1,0 +1,37 @@
+services:
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - php
+    ports:
+      - "${PUBLIC_HTTPS_PORT:-9443}:443"
+    volumes:
+      - ../:/var/www/html:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${SSL_CERT_PATH}:/etc/nginx/certs/cert.pem:ro
+      - ${SSL_KEY_PATH}:/etc/nginx/certs/key.pem:ro
+
+  php:
+    build:
+      context: ./php
+    restart: unless-stopped
+    depends_on:
+      - db
+    working_dir: /var/www/html
+    volumes:
+      - ../:/var/www/html
+
+  db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${OIDC_DB_NAME}
+      MYSQL_USER: ${OIDC_DB_USER}
+      MYSQL_PASSWORD: ${OIDC_DB_PASS}
+      MYSQL_ROOT_PASSWORD: ${OIDC_DB_ROOT_PASS}
+    volumes:
+      - oidc-db-data:/var/lib/mysql
+
+volumes:
+  oidc-db-data:
