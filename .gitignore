@@ -16,6 +16,7 @@ build/
 dist/
 startup_error.log
 *.log
+logs/
 *.pyc
 *.pyo
 *.pyd

@@ -6,7 +6,9 @@
 
 **Architecture:** 新建中央模块 `newtoken/common/logging_setup.py`（标准库 `logging`，轮转文件+控制台+`contextvars` 关联 ID + 脱敏 Filter）；各服务模块改用其 logger，关键异常改 `logger.exception` 落完整栈；HTTP 全量日志只接 `register._retry_request` 单点；run_id 经 contextvars 自动贯穿，线程边界显式接力。
 
-**Tech Stack:** Python 3.11 标准库 `logging` / `logging.handlers.RotatingFileHandler` / `contextvars`；测试用 pytest 8.3（已装于 `.venv`）。
+**Tech Stack:** Python 3.11 标准库 `logging` / `logging.handlers.RotatingFileHandler` / `contextvars`；测试用标准库 `unittest`（零额外依赖，贴合本项目仅 stdlib+curl_cffi 的依赖约束；`.venv` 无 pytest）。
+
+> 执行偏差记录：原计划写 pytest，实测 `.venv` 无 pytest 且项目刻意只依赖 stdlib，故测试改用 `unittest`（命令见下）。
 
 参考 spec：`docs/superpowers/specs/2026-06-16-python-service-logging-design.md`
 
@@ -141,7 +143,7 @@ def test_masking_filter_redacts_token_in_emitted_log(tmp_path: Path):
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `.venv/bin/python -m pytest tests/test_logging_setup.py -q`
+Run: `.venv/bin/python -m unittest tests.test_logging_setup -v`
 Expected: FAIL（`ModuleNotFoundError: newtoken.common.logging_setup` 或属性缺失）
 
 - [ ] **Step 3: 写实现** — `newtoken/common/logging_setup.py`
@@ -352,7 +354,7 @@ def reset_logging() -> None:
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `.venv/bin/python -m pytest tests/test_logging_setup.py -q`
+Run: `.venv/bin/python -m unittest tests.test_logging_setup -v`
 Expected: PASS（10 passed）
 
 - [ ] **Step 5: 提交**
@@ -817,8 +819,8 @@ git commit -m "feat(logging): 新增日志 env 默认值与 .env.example 注释"
 
 - [ ] **Step 1: 单测全过**
 
-Run: `.venv/bin/python -m pytest tests/ -q`
-Expected: all PASS
+Run: `.venv/bin/python -m unittest discover -t . -s tests`
+Expected: OK（10 tests）
 
 - [ ] **Step 2: 所有改动模块可导入**
 
