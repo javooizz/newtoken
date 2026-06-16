@@ -25,6 +25,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
+from newtoken.common.logging_setup import get_logger, log_run_context, mask_text, mask_token
+
+logger = get_logger("webui.register")
+
 DEFAULT_EMAIL_DOMAIN = "@ai.1bool.com"  # 母号 SSO 域名（旧 team.edu.sixoner.com authentik 方案已弃）
 DEFAULT_ONBOARDING_ROLE = "engineering"
 AUTH_HOST = "https://auth.openai.com"
@@ -259,6 +263,15 @@ def _random_birthdate() -> str:
     return f"{random.randint(1988, 2003):04d}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}"
 
 
+def _short_url(url: str) -> str:
+    """日志用：去掉 query（可能含 code/token），只留 scheme://host/path。"""
+    try:
+        parsed = urlparse(str(url))
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    except Exception:
+        return str(url)[:80]
+
+
 def _make_trace_headers() -> dict[str, str]:
     parent_id = random.randint(10**17, 10**18 - 1)
     return {
@@ -372,14 +385,26 @@ class TeamRegistration:
         def _retry_request(method, url, *args, **kwargs):
             last_exc = None
             for attempt in range(5):
+                started = time.time()
                 try:
-                    return _orig_request(method, url, *args, **kwargs)
+                    resp = _orig_request(method, url, *args, **kwargs)
                 except Exception as exc:  # noqa: BLE001
                     if not any(m in str(exc) for m in _retry_markers):
+                        logger.debug("HTTP %s %s 异常(不重试): %s", method, _short_url(url), exc)
                         raise
                     last_exc = exc
+                    logger.debug("HTTP %s %s 传输失败(重试%d): %s", method, _short_url(url), attempt + 1, exc)
                     if attempt < 4:
                         time.sleep(min(0.5 * (2 ** attempt), 5.0) + random.uniform(0, 0.4))
+                    continue
+                elapsed_ms = (time.time() - started) * 1000
+                status = getattr(resp, "status_code", "-")
+                if isinstance(status, int) and status >= 400:
+                    body = mask_text(str(getattr(resp, "text", ""))[:200])
+                    logger.warning("HTTP %s %s -> %s (%.0fms) body=%s", method, _short_url(url), status, elapsed_ms, body)
+                else:
+                    logger.debug("HTTP %s %s -> %s (%.0fms)", method, _short_url(url), status, elapsed_ms)
+                return resp
             raise last_exc
 
         self._session.request = _retry_request
@@ -397,9 +422,7 @@ class TeamRegistration:
     # -- internal helpers ----------------------------------------------------
 
     def _log(self, msg: str) -> None:
-        with _PRINT_LOCK:
-            tag = self._tag or "reg"
-            print(f"{time.strftime('%H:%M:%S')} | {tag:<12} | {msg}", flush=True)
+        logger.info("%s", msg)
 
     def _get_cookie(self, name: str, domain_hint: str = "") -> str:
         jar = getattr(self._session.cookies, "jar", None)
@@ -1036,58 +1059,64 @@ def build_codex_token_json(email: str, tokens: dict[str, Any]) -> str:
 
 def register_one(idx: int, *, email_domain: str = "", proxy_url: str = "",
                  oidc_api_url: str = "", oidc_api_key: str = "", account_id: str = "",
-                 tag_prefix: str = "r") -> RegisterResult:
+                 tag_prefix: str = "r", run_id: str = "") -> RegisterResult:
     """直接 codex oauth + 自建 OIDC 卡密 SSO 注册单个账号，换取 codex token。
 
     流程：发卡 → codex auth_url(login_hint) → SSO → 卡密首次激活 → consent →
     workspace/select → code → 换 token。全程不碰 chatgpt 网页（避免手机验证）。
     """
     tag = f"{tag_prefix}{idx}"
-    reg: TeamRegistration | None = None
-    email = ""
-    steps: list[str] = []
-    try:
-        domain = (email_domain or DEFAULT_EMAIL_DOMAIN).lstrip("@").strip()
-        if not domain:
-            raise RuntimeError("email_domain 为空")
-        if not str(account_id or "").strip():
-            raise RuntimeError("account_id（母号 workspace_id）为空")
+    context_id = f"{run_id}/{tag}" if run_id else tag
+    with log_run_context(context_id):
+        reg: TeamRegistration | None = None
+        email = ""
+        steps: list[str] = []
+        try:
+            domain = (email_domain or DEFAULT_EMAIL_DOMAIN).lstrip("@").strip()
+            if not domain:
+                raise RuntimeError("email_domain 为空")
+            if not str(account_id or "").strip():
+                raise RuntimeError("account_id（母号 workspace_id）为空")
 
-        # 1. 发卡
-        card = issue_oidc_card(oidc_api_url, oidc_api_key)
-        steps.append("issue_card")
+            # 1. 发卡
+            card = issue_oidc_card(oidc_api_url, oidc_api_key)
+            steps.append("issue_card")
 
-        # 2. 随机身份
-        prefix = _random_prefix()
-        email = f"{prefix}@{domain}"
-        full_name = _random_name()
+            # 2. 随机身份
+            prefix = _random_prefix()
+            email = f"{prefix}@{domain}"
+            full_name = _random_name()
 
-        # 3. codex oauth + 卡密 SSO 登录 → codex token
-        reg = TeamRegistration(proxy_url=proxy_url, tag=tag, email_domain="@" + domain)
-        tokens = reg.codex_card_login(email=email, prefix=prefix, card=card,
-                                      account_id=str(account_id).strip(), domain=domain,
-                                      full_name=full_name, steps=steps)
-        token_json = build_codex_token_json(email, tokens)
-        reg._log(f"[done] email={email} rt={str(tokens.get('refresh_token') or '')[:8]}...")
-        return RegisterResult(ok=True, email=email, token_json=token_json, steps_completed=steps)
+            # 3. codex oauth + 卡密 SSO 登录 → codex token
+            reg = TeamRegistration(proxy_url=proxy_url, tag=tag, email_domain="@" + domain)
+            logger.info("开始注册 email=%s", email)
+            tokens = reg.codex_card_login(email=email, prefix=prefix, card=card,
+                                          account_id=str(account_id).strip(), domain=domain,
+                                          full_name=full_name, steps=steps)
+            token_json = build_codex_token_json(email, tokens)
+            reg._log(f"[done] email={email} rt={mask_token(str(tokens.get('refresh_token') or ''))}")
+            logger.info("注册成功 email=%s steps=%s", email, ",".join(steps))
+            return RegisterResult(ok=True, email=email, token_json=token_json, steps_completed=steps)
 
-    except Exception as exc:
-        return RegisterResult(ok=False, email=email, error=f"{type(exc).__name__}: {exc}", steps_completed=steps)
-    finally:
-        if reg is not None:
-            reg.close()
+        except Exception as exc:
+            logger.exception("注册失败 email=%s steps=%s", email or "-", ",".join(steps))
+            return RegisterResult(ok=False, email=email, error=f"{type(exc).__name__}: {exc}", steps_completed=steps)
+        finally:
+            if reg is not None:
+                reg.close()
 
 
 def register_batch(count: int, *, email_domain: str = "", proxy_url: str = "",
                    oidc_api_url: str = "", oidc_api_key: str = "", account_id: str = "",
-                   max_workers: int = 1) -> list[RegisterResult]:
+                   max_workers: int = 1, run_id: str = "") -> list[RegisterResult]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     results: list[RegisterResult] = []
     with ThreadPoolExecutor(max_workers=min(max_workers, max(1, count)), thread_name_prefix="webui-reg-") as ex:
         futures = {
             ex.submit(register_one, i + 1, email_domain=email_domain, proxy_url=proxy_url,
-                      oidc_api_url=oidc_api_url, oidc_api_key=oidc_api_key, account_id=account_id): i + 1
+                      oidc_api_url=oidc_api_url, oidc_api_key=oidc_api_key, account_id=account_id,
+                      run_id=run_id): i + 1
             for i in range(count)
         }
         for fut in as_completed(futures):
