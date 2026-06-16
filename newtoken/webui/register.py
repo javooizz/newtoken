@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
-DEFAULT_EMAIL_DOMAIN = "@team.edu.sixoner.com"
+DEFAULT_EMAIL_DOMAIN = "@ai.1bool.com"  # 母号 SSO 域名（旧 team.edu.sixoner.com authentik 方案已弃）
 DEFAULT_ONBOARDING_ROLE = "engineering"
 AUTH_HOST = "https://auth.openai.com"
 CHATGPT_HOST = "https://chatgpt.com"
@@ -33,6 +33,7 @@ OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 OAUTH_REDIRECT_URI = "http://localhost:1455/auth/callback"
 OAUTH_SCOPE = "openid profile email offline_access api.connectors.read api.connectors.invoke"
 OAUTH_ORIGINATOR = "codex_vscode"
+CODEX_SCOPE = "openid profile email offline_access"  # codex CLI 同款 scope（不含 connectors，对齐 gpt_onboard）
 SENTINEL_SDK = "20260124ceb8"
 MAX_POW_ATTEMPTS = 500000
 POW_ERROR_PREFIX = "wQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D"
@@ -223,6 +224,37 @@ def _random_name() -> str:
     return f"{random.choice(_FIRST_NAMES)} {random.choice(_LAST_NAMES)}"
 
 
+def _random_prefix() -> str:
+    """随机邮箱前缀（自动注册用）。"""
+    name = (random.choice(_FIRST_NAMES) + random.choice(_LAST_NAMES)).lower()
+    return f"{name}{random.randint(1000, 9999)}"
+
+
+def issue_oidc_card(api_url: str, api_key: str) -> str:
+    """调 OIDC 发卡 API 生成一张卡并返回卡密。
+
+    用 curl_cffi impersonate 直连（OIDC 经 Cloudflare，urllib 默认 UA 会被 403）。
+    """
+    from curl_cffi import requests as curl_requests
+
+    api_url = str(api_url or "").strip().rstrip("/")
+    api_key = str(api_key or "").strip()
+    if not api_url or not api_key:
+        raise RuntimeError("OIDC api_url/api_key 未配置，无法发卡")
+    resp = curl_requests.post(
+        f"{api_url}/api/cards/generate",
+        json={"count": 1, "expires_days": 30, "note": "auto_register"},
+        headers={"Authorization": f"Bearer {api_key}"}, impersonate="chrome", timeout=20,
+    )
+    if int(getattr(resp, "status_code", 0) or 0) != 200:
+        raise RuntimeError(f"发卡失败 http={getattr(resp, 'status_code', '-')}: {str(getattr(resp, 'text', ''))[:160]}")
+    data = resp.json()
+    cards = data.get("cards") if isinstance(data, dict) else None
+    if not cards:
+        raise RuntimeError(f"发卡响应无 cards: {str(data)[:160]}")
+    return str(cards[0])
+
+
 def _random_birthdate() -> str:
     return f"{random.randint(1988, 2003):04d}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}"
 
@@ -303,6 +335,11 @@ class TeamRegistration:
         session_kwargs: dict[str, Any] = {"impersonate": self._impersonate}
         proxy_url = str(proxy_url or "").strip()
         if proxy_url:
+            # Cloudflare 后端（chatgpt / auth.openai / sentinel）必须用代理侧 DNS：
+            # socks5://（本地解析）会拿到与出口 IP 不匹配的 CF anycast IP，TLS 握手被 reset。
+            # 强制升级为 socks5h://（远端解析）。
+            if proxy_url.startswith("socks5://"):
+                proxy_url = "socks5h://" + proxy_url[len("socks5://") :]
             session_kwargs["proxies"] = {"http": proxy_url, "https": proxy_url}
         if CurlHttpVersion is not None:
             session_kwargs["http_version"] = CurlHttpVersion.V1_1
@@ -322,6 +359,30 @@ class TeamRegistration:
             "Upgrade-Insecure-Requests": "1",
         })
         self._session.cookies.set("oai-did", self._device_id, domain="chatgpt.com")
+
+        # 住宅代理对 Cloudflare 后端会间歇性 reset/timeout（实测单次失败率 ~37%）。
+        # 长注册链路十几个串行请求，单步抖动即整体失败。对传输级失败（连接阶段、
+        # 请求未送达，重试安全）自动重试，穿过代理噪音。
+        _orig_request = self._session.request
+        _retry_markers = (
+            "Recv failure", "Connection reset", "timed out",
+            "TLS connect error", "Connection refused", "Could not resolve",
+        )
+
+        def _retry_request(method, url, *args, **kwargs):
+            last_exc = None
+            for attempt in range(5):
+                try:
+                    return _orig_request(method, url, *args, **kwargs)
+                except Exception as exc:  # noqa: BLE001
+                    if not any(m in str(exc) for m in _retry_markers):
+                        raise
+                    last_exc = exc
+                    if attempt < 4:
+                        time.sleep(min(0.5 * (2 ** attempt), 5.0) + random.uniform(0, 0.4))
+            raise last_exc
+
+        self._session.request = _retry_request
 
     def close(self) -> None:
         with suppress(Exception):
@@ -714,6 +775,155 @@ class TeamRegistration:
             return None
         return data if isinstance(data, dict) else None
 
+    # -- codex oauth + oidc 卡密 SSO 登录（免手机验证，2026-06 现行方案） -------
+
+    def build_codex_auth_url(self, email: str) -> tuple[str, str, str]:
+        """生成 codex CLI 同款 PKCE auth_url（带 login_hint），返回 (url, verifier, state)。"""
+        verifier, challenge = generate_pkce()
+        state = secrets.token_urlsafe(24)
+        params = {
+            "response_type": "code", "client_id": OAUTH_CLIENT_ID, "redirect_uri": OAUTH_REDIRECT_URI,
+            "scope": CODEX_SCOPE, "state": state,
+            "code_challenge": challenge, "code_challenge_method": "S256",
+            "id_token_add_organizations": "true", "codex_cli_simplified_flow": "true",
+            "login_hint": email,
+        }
+        return f"{AUTH_HOST}/oauth/authorize?{urlencode(params)}", verifier, state
+
+    def codex_card_login(self, *, email: str, prefix: str, card: str, account_id: str,
+                         domain: str, full_name: str, steps: list[str]) -> dict[str, Any]:
+        """直接 codex oauth + 自建 OIDC 卡密 SSO 登录，换取 codex token（含 refresh_token）。
+
+        关键：必须以 codex auth_url 为第一个请求、全程不碰 chatgpt 网页，否则触发手机验证。
+        复刻已验证的 10 步流程（见 codex-card-sso-flow 记录）。
+        """
+        imp = self._impersonate
+        S = self._session
+        html_accept = (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        )
+
+        def _is_card_page(resp: Any) -> bool:
+            return 'name="card_key"' in str(getattr(resp, "text", "") or "")
+
+        # 1. GET codex auth_url(login_hint) → OpenAI SSO 选择页 或直接我方卡密页
+        auth_url, verifier, _state = self.build_codex_auth_url(email)
+        resp = S.get(auth_url, allow_redirects=True, timeout=30, impersonate=imp,
+                     headers={"Accept": html_accept, "Upgrade-Insecure-Requests": "1"})
+        final = str(resp.url)
+        self._log(f"[codex] authorize landed {resp.status_code} {final[:80]}")
+        steps.append("codex_authorize")
+
+        # 2. 若停在 OpenAI SSO 选择页 → 取 connection + authorize/continue → 跟随进我方卡密页
+        if not _is_card_page(resp):
+            conn_name, conn_provider = self._extract_sso_connection()
+            sentinel = self._build_sentinel("authorize_continue")
+            headers = {
+                "Content-Type": "application/json", "Accept": "application/json",
+                "Accept-Language": self._accept_language, "Referer": final, "Origin": AUTH_HOST,
+                "oai-device-id": self._device_id, "openai-sentinel-token": sentinel,
+                "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin",
+            }
+            headers.update(_make_trace_headers())
+            r = S.post(f"{AUTH_HOST}/api/accounts/authorize/continue",
+                       json={"connection": conn_name, "connection_provider": conn_provider},
+                       headers=headers, allow_redirects=False, timeout=30, impersonate=imp)
+            data = self._json_or_raise(r, "authorize/continue")
+            cur = str(data.get("continue_url") or ((data.get("page") or {}).get("payload") or {}).get("url") or "")
+            if not cur:
+                raise RuntimeError("authorize/continue did not return continue_url")
+            steps.append("sso_continue")
+            for _ in range(10):
+                r = S.get(cur, headers={"Accept": html_accept, "Upgrade-Insecure-Requests": "1"},
+                          allow_redirects=False, timeout=30, impersonate=imp)
+                if int(r.status_code or 0) in (301, 302, 303, 307, 308):
+                    cur = urljoin(cur, str(r.headers.get("Location") or ""))
+                    continue
+                break
+            resp = r
+            final = str(r.url)
+
+        if not _is_card_page(resp):
+            raise RuntimeError(f"did not reach OIDC card page, landed at {final}")
+
+        origin = f"{urlparse(final).scheme}://{urlparse(final).netloc}"
+        card_post_url = origin + urlparse(final).path  # e.g. https://oidc.1bool.com/sso
+
+        # 3. 解析 csrf → POST 卡密 + 邮箱前缀（首次激活绑卡）
+        csrf_m = re.search(r'name="csrf_token"\s+value="([^"]+)"', str(resp.text))
+        csrf = csrf_m.group(1) if csrf_m else ""
+        r = S.post(card_post_url,
+                   data={"csrf_token": csrf, "email_prefix": prefix, "email_domain": domain,
+                         "card_key": card, "full_name": full_name},
+                   headers={"Content-Type": "application/x-www-form-urlencoded", "Referer": final, "Origin": origin},
+                   allow_redirects=False, timeout=30, impersonate=imp)
+        if int(r.status_code or 0) not in (301, 302, 303, 307, 308):
+            raise RuntimeError(f"card submit failed http={r.status_code}: {str(r.text)[:160]}")
+        steps.append("card_submit")
+
+        # 4. 跟随 resume 桥接页 → 抽取回 OpenAI 的 callback href（含 code）
+        r = S.get(urljoin(card_post_url, str(r.headers.get("Location") or "")),
+                  allow_redirects=True, timeout=30, impersonate=imp, headers={"Accept": html_accept})
+        cb_m = re.search(r'href="(https://[^"]+/sso/oidc/[^"]+callback\?code=[^"]+)"', str(r.text))
+        callback = cb_m.group(1).replace("&amp;", "&") if cb_m else ""
+        if not callback:
+            raise RuntimeError("bridge page missing OpenAI callback href")
+        steps.append("oidc_callback")
+
+        # 5. GET callback → signin-consent → POST interstitial 确认
+        r = S.get(callback, allow_redirects=True, timeout=30, impersonate=imp, headers={"Accept": html_accept})
+        consent_url, html = str(r.url), str(r.text)
+        if "signin-consent" in consent_url or 'name="interstitial_token"' in html:
+            action, fields = _extract_first_form(html)
+            r = S.post(urljoin(consent_url, action),
+                       data={"interstitial_token": fields.get("interstitial_token", ""),
+                             "action": fields.get("action", "confirm"), "csrf_token": fields.get("csrf_token", "")},
+                       headers={"Content-Type": "application/x-www-form-urlencoded", "Referer": consent_url},
+                       allow_redirects=False, timeout=30, impersonate=imp)
+            r = S.get(urljoin(consent_url, str(r.headers.get("Location") or "")),
+                      allow_redirects=True, timeout=30, impersonate=imp, headers={"Accept": html_accept})
+            consent_url, html = str(r.url), str(r.text)
+            steps.append("signin_consent")
+
+        # 6. codex consent「Continue」实为 POST /api/accounts/workspace/select (JSON) → continue_url → code
+        code = extract_code_from_url(consent_url)
+        if not code and "codex/consent" in consent_url:
+            sentinel = self._build_sentinel("login")
+            headers = {
+                "Content-Type": "application/json", "Accept": "application/json", "Referer": consent_url,
+                "Origin": AUTH_HOST, "oai-device-id": self._device_id,
+                "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty",
+            }
+            headers.update(_make_trace_headers())
+            if sentinel:
+                headers["openai-sentinel-token"] = sentinel
+            r = S.post(f"{AUTH_HOST}/api/accounts/workspace/select",
+                       json={"workspace_id": account_id}, headers=headers,
+                       allow_redirects=False, timeout=30, impersonate=imp)
+            nxt = ""
+            try:
+                d = r.json()
+                if isinstance(d, dict):
+                    nxt = str(d.get("continue_url") or d.get("url") or d.get("redirect_url")
+                              or ((d.get("page") or {}).get("payload") or {}).get("url") or "")
+            except Exception:
+                nxt = ""
+            nxt = nxt or str(r.headers.get("Location") or "")
+            if nxt:
+                code = extract_code_from_url(nxt) or self.follow_url_for_code(nxt, referer=consent_url)
+            steps.append("workspace_select")
+
+        if not code:
+            raise RuntimeError(f"missing authorization code at {consent_url}")
+        steps.append("codex_code")
+
+        # 7. 换 token（必须有 refresh_token）
+        tokens = self.exchange_codex_code(code, verifier)
+        if not tokens or not isinstance(tokens, dict) or not str(tokens.get("refresh_token") or "").strip():
+            raise RuntimeError("/oauth/token failed or missing refresh_token")
+        steps.append("codex_token")
+        return tokens
+
     def follow_url_for_code(self, start_url: str, referer: str = "") -> str:
         current = str(start_url or "")
         for _ in range(12):
@@ -824,108 +1034,62 @@ def build_codex_token_json(email: str, tokens: dict[str, Any]) -> str:
     }, ensure_ascii=False)
 
 
-def register_one(idx: int, *, email_domain: str = "", proxy_url: str = "", tag_prefix: str = "r") -> RegisterResult:
+def register_one(idx: int, *, email_domain: str = "", proxy_url: str = "",
+                 oidc_api_url: str = "", oidc_api_key: str = "", account_id: str = "",
+                 tag_prefix: str = "r") -> RegisterResult:
+    """直接 codex oauth + 自建 OIDC 卡密 SSO 注册单个账号，换取 codex token。
+
+    流程：发卡 → codex auth_url(login_hint) → SSO → 卡密首次激活 → consent →
+    workspace/select → code → 换 token。全程不碰 chatgpt 网页（避免手机验证）。
+    """
     tag = f"{tag_prefix}{idx}"
     reg: TeamRegistration | None = None
     email = ""
+    steps: list[str] = []
     try:
-        domain = email_domain or DEFAULT_EMAIL_DOMAIN
-        if not domain.startswith("@"):
-            domain = "@" + domain
-        reg = TeamRegistration(proxy_url=proxy_url, tag=tag, email_domain=domain)
-        name = _random_name()
-        birthdate = _random_birthdate()
-        local = name.replace(" ", "").lower() + str(random.randint(1000, 9999))
-        email = f"{local}{domain}"
-        steps: list[str] = []
+        domain = (email_domain or DEFAULT_EMAIL_DOMAIN).lstrip("@").strip()
+        if not domain:
+            raise RuntimeError("email_domain 为空")
+        if not str(account_id or "").strip():
+            raise RuntimeError("account_id（母号 workspace_id）为空")
 
-        reg.visit_homepage()
-        steps.append("homepage")
-        time.sleep(random.uniform(1.0, 2.5))
+        # 1. 发卡
+        card = issue_oidc_card(oidc_api_url, oidc_api_key)
+        steps.append("issue_card")
 
-        csrf = reg.get_csrf()
-        steps.append("csrf")
-        time.sleep(random.uniform(0.5, 1.5))
+        # 2. 随机身份
+        prefix = _random_prefix()
+        email = f"{prefix}@{domain}"
+        full_name = _random_name()
 
-        auth_url = reg.signin(email, csrf)
-        steps.append("signin")
-        time.sleep(random.uniform(1.0, 2.0))
-
-        final_url = reg.authorize(auth_url)
-        steps.append("authorize")
-        final_path = urlparse(final_url).path
-
-        if "about-you" in final_path:
-            time.sleep(random.uniform(0.5, 1.5))
-            reg.create_account(name, birthdate)
-            steps.append("create_account")
-            reg.callback()
-            steps.append("callback")
-        elif "/sso" in final_path:
-            time.sleep(random.uniform(1.0, 2.0))
-            final_url = reg._complete_sso_web_flow(email, final_url)
-            steps.append("sso_flow")
-            final_path = urlparse(final_url).path
-            final_host = (urlparse(final_url).hostname or "").lower()
-            if "about-you" in final_path:
-                time.sleep(random.uniform(0.5, 1.5))
-                reg.create_account(name, birthdate)
-                steps.append("create_account")
-                reg.callback()
-                steps.append("callback")
-        elif "chatgpt.com" in final_url:
-            pass
-        else:
-            raise RuntimeError(f"unexpected authorize destination: {final_url}")
-
-        time.sleep(random.uniform(0.5, 1.5))
-        at_result = reg.get_access_token()
-        steps.append("access_token")
-        access_token = str(at_result.get("access_token") or "")
-        if not access_token:
-            raise RuntimeError("missing access token")
-
-        time.sleep(random.uniform(0.5, 1.5))
-        reg.patch_onboarding(access_token)
-        steps.append("onboarding")
-
-        time.sleep(random.uniform(1.0, 2.0))
-        oauth_result = reg.oauth_authorize_codex()
-        steps.append("codex_authorize")
-        code = extract_code_from_url(oauth_result["final_url"])
-        if not code:
-            code = reg.follow_url_for_code(oauth_result["final_url"],
-                                           referer=oauth_result["final_url"] if oauth_result["final_url"].startswith(AUTH_HOST) else f"{AUTH_HOST}/log-in")
-        if not code:
-            raise RuntimeError("missing authorization code")
-        steps.append("codex_code")
-
-        tokens = reg.exchange_codex_code(code, oauth_result["verifier"])
-        if not tokens or not isinstance(tokens, dict):
-            raise RuntimeError("/oauth/token failed")
-        refresh_token = str(tokens.get("refresh_token") or "").strip()
-        if not refresh_token:
-            raise RuntimeError("missing refresh_token")
-        steps.append("codex_token")
-
+        # 3. codex oauth + 卡密 SSO 登录 → codex token
+        reg = TeamRegistration(proxy_url=proxy_url, tag=tag, email_domain="@" + domain)
+        tokens = reg.codex_card_login(email=email, prefix=prefix, card=card,
+                                      account_id=str(account_id).strip(), domain=domain,
+                                      full_name=full_name, steps=steps)
         token_json = build_codex_token_json(email, tokens)
-        reg._log(f"[done] email={email} rt={refresh_token[:8]}...")
+        reg._log(f"[done] email={email} rt={str(tokens.get('refresh_token') or '')[:8]}...")
         return RegisterResult(ok=True, email=email, token_json=token_json, steps_completed=steps)
 
     except Exception as exc:
-        err = f"{type(exc).__name__}: {exc}"
-        return RegisterResult(ok=False, email=email, error=err)
+        return RegisterResult(ok=False, email=email, error=f"{type(exc).__name__}: {exc}", steps_completed=steps)
     finally:
         if reg is not None:
             reg.close()
 
 
-def register_batch(count: int, *, email_domain: str = "", proxy_url: str = "", max_workers: int = 1) -> list[RegisterResult]:
+def register_batch(count: int, *, email_domain: str = "", proxy_url: str = "",
+                   oidc_api_url: str = "", oidc_api_key: str = "", account_id: str = "",
+                   max_workers: int = 1) -> list[RegisterResult]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     results: list[RegisterResult] = []
     with ThreadPoolExecutor(max_workers=min(max_workers, max(1, count)), thread_name_prefix="webui-reg-") as ex:
-        futures = {ex.submit(register_one, i + 1, email_domain=email_domain, proxy_url=proxy_url): i + 1 for i in range(count)}
+        futures = {
+            ex.submit(register_one, i + 1, email_domain=email_domain, proxy_url=proxy_url,
+                      oidc_api_url=oidc_api_url, oidc_api_key=oidc_api_key, account_id=account_id): i + 1
+            for i in range(count)
+        }
         for fut in as_completed(futures):
             results.append(fut.result())
     return sorted(results, key=lambda r: r.ok, reverse=True)

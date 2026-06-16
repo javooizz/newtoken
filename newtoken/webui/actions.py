@@ -15,9 +15,8 @@ from newtoken.webui.acc import (
     is_low_quota_snapshot,
     load_acc_members,
     parse_acc_import_payload,
-    refresh_acc_usage,
 )
-from newtoken.webui.auto import run_auto_cycle
+from newtoken.webui.auto import run_auto_maintenance
 from newtoken.webui.conversion import import_cached_conversion, run_conversion
 from newtoken.webui.monitor import evaluate_health
 from newtoken.webui.oauth import (
@@ -43,8 +42,7 @@ __all__ = [
     "is_low_quota_snapshot",
     "load_acc_members",
     "parse_acc_import_payload",
-    "refresh_acc_usage",
-    "run_auto_cycle",
+    "run_auto_maintenance",
     "run_conversion",
     "start_oauth_flow",
 ]

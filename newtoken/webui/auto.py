@@ -120,7 +120,13 @@ def run_auto_maintenance(state: WebState) -> dict[str, Any]:
     # ---- Phase 4: register new accounts -----------------------------------
     register_count = max(1, auto_cfg["count"] - quota_ok)
     try:
-        register_results = register_batch(register_count, email_domain=email_domain, proxy_url=proxy_url, max_workers=1)
+        register_results = register_batch(
+            register_count, email_domain=email_domain, proxy_url=proxy_url,
+            oidc_api_url=str(config.get("SUB2API_OIDC_API_URL") or "").strip(),
+            oidc_api_key=str(config.get("SUB2API_OIDC_API_KEY") or "").strip(),
+            account_id=str(config.get("OPENAI_ACCOUNT_ID") or "").strip(),
+            max_workers=1,
+        )
         ok_results = [r for r in register_results if r.ok]
         fail_results = [r for r in register_results if not r.ok]
         report["phases"].append({**_auto_phase("register", start), "result": {
