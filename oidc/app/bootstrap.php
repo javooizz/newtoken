@@ -18,6 +18,12 @@ $sampleFile = __DIR__ . '/config.sample.php';
 $GLOBALS['app_config_missing'] = !is_file($configFile);
 $GLOBALS['app_config'] = require $GLOBALS['app_config_missing'] ? $sampleFile : $configFile;
 
+// 生产环境隐藏 PHP 警告/通知，避免污染 JSON 端点；错误仍写入日志
+$appDebug = !empty($GLOBALS['app_config']['app_debug']);
+@ini_set('display_errors', $appDebug ? '1' : '0');
+@ini_set('log_errors', '1');
+error_reporting($appDebug ? E_ALL : (E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_WARNING));
+
 $requestPath = app_path();
 $statelessPaths = [
     '/.well-known/openid-configuration',
