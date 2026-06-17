@@ -369,6 +369,11 @@ def build_openai_post_import_update_payload(config, account_ids):
             "openai_oauth_responses_websockets_v2_enabled": True,
         },
     }
+    # 走 /accounts/data 导入时 proxy_id 不在导入体内生效（ImportData 不读该字段）；
+    # 必须在 post-import bulk-update 里随 group_ids 一起绑定，号才会走和母号/注册
+    # 一致的出口代理（IP 一致，防号被调用时 IP 跳变触发 401）。
+    if config.proxy_id is not None:
+        payload["proxy_id"] = config.proxy_id
     if config.confirm_mixed_channel_risk:
         payload["confirm_mixed_channel_risk"] = True
     return payload
