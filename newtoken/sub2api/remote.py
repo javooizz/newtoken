@@ -35,7 +35,7 @@ DEFAULT_IMPORT_SKIP_DEFAULT_GROUP_BIND = False
 DEFAULT_IMPORT_CONFIRM_MIXED_CHANNEL_RISK = False
 REMOTE_DELETE_CONCURRENCY = 10
 DEFAULT_OPENAI_IMPORT_GROUP_NAME = "cc"
-DEFAULT_OPENAI_IMPORT_CONCURRENCY = 50
+DEFAULT_OPENAI_IMPORT_CONCURRENCY = 5
 DEFAULT_OPENAI_ACCOUNT_STATUS = "active"
 DEFAULT_OPENAI_OAUTH_WS_MODE = "passthrough"
 REMOTE_ACCOUNT_PAGE_SIZE = 1000
@@ -216,7 +216,7 @@ def build_remote_config(
         admin_api_key=normalized_api_key,
         group_ids=parse_int_list_text(group_ids_text),
         proxy_id=parse_optional_int_text(proxy_id_text),
-        concurrency=parse_optional_int_text(concurrency_text),
+        concurrency=DEFAULT_OPENAI_IMPORT_CONCURRENCY,
         priority=parse_optional_int_text(priority_text),
         update_existing=bool(update_existing),
         skip_default_group_bind=bool(skip_default_group_bind),
@@ -663,12 +663,12 @@ def extract_remote_record(account_item):
     }
 
 
-def fetch_remote_account_list(config):
-    """读取远程 OpenAI OAuth 账号列表，用于拿到账号 ID 和基础信息。"""
+def _fetch_account_items_for_group(config, headers, group):
+    """拉取单个分组（group=None 表示不过滤）的全部账号条目，处理分页。"""
 
     account_items = []
     page = 1
-    headers = build_sub2api_admin_headers(config.admin_api_key)
+    group_filter = f"&group={group}" if group not in (None, "") else ""
     while True:
         if page > REMOTE_ACCOUNT_MAX_PAGES:
             raise RuntimeError(
@@ -678,7 +678,7 @@ def fetch_remote_account_list(config):
         path = (
             f"{SUB2API_ACCOUNTS_LIST_PATH}?platform=openai&type=oauth"
             f"&page={page}&page_size={REMOTE_ACCOUNT_PAGE_SIZE}"
-            "&sort_by=name&sort_order=asc"
+            f"&sort_by=name&sort_order=asc{group_filter}"
         )
         url = build_sub2api_admin_url(config.base_url, path)
         status_code, body_text, payload = request_json(url, headers=headers)
@@ -689,13 +689,44 @@ def fetch_remote_account_list(config):
         data = unwrap_sub2api_response(payload)
         if not isinstance(data, dict):
             raise RuntimeError("远程账号列表返回格式不符合预期")
-        items = data.get("items") or []
-        account_items.extend(item for item in items if isinstance(item, dict))
+        items = [item for item in (data.get("items") or []) if isinstance(item, dict)]
+        account_items.extend(items)
         total = int(data.get("total", len(account_items)))
         if len(account_items) >= total or not items:
             break
         page += 1
     return account_items
+
+
+def fetch_remote_account_list(config, *, apply_group_filter=True):
+    """读取远程 OpenAI OAuth 账号列表。
+
+    ``apply_group_filter=True``（默认，供扫描/水位统计用）：仅统计本母号分组
+    (config.group_ids) 的账号。Sub2API 服务端只认单数 ``group=<id>`` 过滤
+    （``group_id`` / ``group_ids`` 会被忽略）；多分组时逐组查询后按 id 去重合并。
+
+    ``apply_group_filter=False``（供导入的 dedup/resolve 用）：拉全部分组，
+    因为刚导入、尚未绑定分组的新号必须能被跨分组查到，否则绑组步骤拿不到
+    account_id（典型「先建号后绑组」依赖无过滤查询）。
+    """
+
+    headers = build_sub2api_admin_headers(config.admin_api_key)
+    group_ids = [group for group in (config.group_ids or []) if group]
+    if apply_group_filter and group_ids:
+        groups_to_query = group_ids
+    else:
+        groups_to_query = [None]
+
+    merged = {}
+    ordered_keys = []
+    for group in groups_to_query:
+        for item in _fetch_account_items_for_group(config, headers, group):
+            account_id = item.get("id")
+            key = ("id", account_id) if account_id is not None else ("obj", id(item))
+            if key not in merged:
+                merged[key] = item
+                ordered_keys.append(key)
+    return [merged[key] for key in ordered_keys]
 
 
 def fetch_remote_account_export_data(config):
@@ -1170,7 +1201,10 @@ def import_to_sub2api_codex_session(config, payload_text):
     effective_config = build_effective_openai_import_config(config)
     parsed_payload = parse_payload_text(payload_text)
     if is_sub2api_data_payload(parsed_payload):
-        remote_list_before = fetch_remote_account_list(effective_config)
+        # 无过滤：dedup 要跨所有分组判断账号是否已存在
+        remote_list_before = fetch_remote_account_list(
+            effective_config, apply_group_filter=False
+        )
         import_plan = build_sub2api_data_import_plan(parsed_payload, remote_list_before)
         import_result = {
             "url": build_sub2api_admin_url(config.base_url, SUB2API_DATA_IMPORT_PATH),
@@ -1200,7 +1234,12 @@ def import_to_sub2api_codex_session(config, payload_text):
                 effective_config,
                 import_plan["import_payload"],
             )
-        remote_list_after = fetch_remote_account_list(effective_config)
+        # 无过滤：刚导入、尚未绑定分组的新号必须能被跨分组查到才能 resolve 出
+        # account_id，进而被 post_import_update 绑定到 config.group_ids（修复
+        # 「数据路径导入后 group_ids=None」的绑组失败）。
+        remote_list_after = fetch_remote_account_list(
+            effective_config, apply_group_filter=False
+        )
         resolved_account_ids = resolve_sub2api_data_account_ids(
             parsed_payload.get("accounts") or [],
             remote_list_after,

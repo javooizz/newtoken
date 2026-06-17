@@ -6,6 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from newtoken.common.http_client import request_json as http_request_json
 
@@ -295,11 +296,92 @@ def classify_failure(status_code, detail, body_text=""):
     return "other_error"
 
 
+# OpenAI 端点都在 Cloudflare 后：纯 Python TLS（即便挂代理）会被 403/reset，
+# 必须 curl_cffi 浏览器指纹 + 住宅代理。校验(token 刷新 / 额度)请求走这条路。
+_FINGERPRINT_HOSTS = ("auth.openai.com", "chatgpt.com", "api.openai.com")
+_OUTBOUND_PROXY_ENV_KEYS = (
+    "SUB2API_OUTBOUND_PROXY_URL",
+    "SUB2API_SOCKS5_PROXY_URL",
+    "ALL_PROXY",
+)
+
+
+def _resolve_outbound_proxy():
+    """从环境变量解析出站代理 URL（WebUI 进程在 main() 里写入 os.environ）。"""
+    for key in _OUTBOUND_PROXY_ENV_KEYS:
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _host_needs_fingerprint(url):
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except Exception:
+        return False
+    return any(host == h or host.endswith("." + h) for h in _FINGERPRINT_HOSTS)
+
+
+def _cf_request_json(url, *, method, headers, json_body, timeout, proxy_url):
+    """用 curl_cffi(Chrome 指纹)+socks5h 代理发 JSON 请求，绕过 OpenAI 的 Cloudflare。"""
+    from curl_cffi import requests as curl_requests
+
+    proxy = str(proxy_url or "").strip()
+    if proxy.startswith("socks5://"):
+        # 本地解析(socks5)会拿到与出口不符的 CF anycast IP 致握手 reset；升级 socks5h。
+        proxy = "socks5h://" + proxy[len("socks5://"):]
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    kwargs = {
+        "headers": dict(headers or {}),
+        "proxies": proxies,
+        "impersonate": "chrome",
+        "timeout": timeout,
+    }
+    if json_body is not None:
+        kwargs["json"] = json_body
+    # 住宅代理对 OpenAI 偶发 Connection reset，带退避重试 3 次，避免把有效号误判死。
+    import time as _time
+
+    last_exc = None
+    for attempt in range(3):
+        try:
+            resp = curl_requests.request(method.upper(), url, **kwargs)
+            status = int(getattr(resp, "status_code", 0) or 0)
+            text = str(getattr(resp, "text", "") or "")
+            try:
+                payload = resp.json()
+            except Exception:
+                payload = None
+            return status, text, payload
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < 2:
+                _time.sleep(0.6 * (attempt + 1))
+                continue
+    raise RuntimeError(f"OpenAI 校验请求失败(curl): {last_exc}") from last_exc
+
+
 def request_json(
     url, method="GET", headers=None, json_body=None, timeout=HTTP_TIMEOUT_SECONDS
 ):
-    """发起 JSON 请求，并把成功和 HTTP 错误都统一成可继续处理的结构。"""
+    """发起 JSON 请求，并把成功和 HTTP 错误都统一成可继续处理的结构。
 
+    OpenAI 端点（auth.openai.com / chatgpt.com，Cloudflare 后）在配置了出站代理时
+    走 curl_cffi 指纹+socks5h，避免纯 TLS 被 403/reset 导致账号被误判死；其余主机
+    （如 Sub2API onebool.com）保持标准传输。
+    """
+
+    proxy = _resolve_outbound_proxy()
+    if proxy and _host_needs_fingerprint(url):
+        return _cf_request_json(
+            url,
+            method=method,
+            headers=headers,
+            json_body=json_body,
+            timeout=timeout,
+            proxy_url=proxy,
+        )
     return http_request_json(
         url,
         method=method,

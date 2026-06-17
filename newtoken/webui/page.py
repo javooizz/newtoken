@@ -70,7 +70,7 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
             <div><label>Sub2API 代理 ID</label><input id="cfg_proxy_id" value="{view['proxy_id']}" placeholder="留空自动使用账号配置"></div>
             <div><label>SOCKS5 出站代理</label><input id="cfg_outbound_proxy" value="{view['outbound_proxy']}" placeholder="socks5://127.0.0.1:1080"></div>
             <div><label>导入并发</label><input id="cfg_import_concurrency" value="{view['import_concurrency']}"></div>
-            <div><label>校验并发</label><input id="cfg_validate_concurrency" value="{view['validate_concurrency']}"></div>
+            <div><label>校验并发</label><input id="cfg_validate_concurrency_config" value="{view['validate_concurrency']}"></div>
           </div>
         </div>
 
@@ -92,6 +92,7 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
             <div><label>OIDC API 地址</label><input id="cfg_oidc_api_url" value="{view['oidc_api_url']}" placeholder="https://oidc.example.com"></div>
             <div><label>OIDC API Key</label><input id="cfg_oidc_api_key" value="" type="password" placeholder="{view['oidc_api_key_placeholder']}"></div>
             <div><label>自动注册域名</label><input id="cfg_auto_register_domain" value="{view['auto_register_domain']}" placeholder="@team.edu.sixoner.com"></div>
+            <div><label>后端号池模板</label><input id="cfg_acc_backend_email_template" value="{view['acc_backend_email_template']}" placeholder="后端号池邮箱模板，留空不启用"></div>
             <div><label>自动注册数</label><input id="cfg_auto_register_count" value="{view['auto_register_count']}"></div>
             <div><label>注册阈值</label><input id="cfg_auto_register_threshold" value="{view['auto_register_threshold']}"></div>
             <div><label>自动注册</label><select id="cfg_auto_register_enabled"><option value="true" {view['auto_register_enabled_true']}>开启</option><option value="false" {view['auto_register_enabled_false']}>关闭</option></select></div>
@@ -105,6 +106,7 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
             <div><label>Web Host</label><input id="cfg_web_host" value="{view['web_host']}"></div>
             <div><label>公网地址</label><input id="cfg_public_base_url" value="{view['public_base_url']}" placeholder="https://你的域名 或 http://IP:端口"></div>
             <div><label>Web 密码</label><input id="cfg_web_secret" value="" type="password" placeholder="留空不修改"></div>
+            <div><label>PushPlus Token</label><input id="cfg_pushplus_token" value="" type="password" placeholder="留空不修改"></div>
             <div><label>自动策略</label><select id="cfg_auto_policy_enabled"><option value="true" {view['auto_policy_enabled_true']}>开启</option><option value="false" {view['auto_policy_enabled_false']}>关闭</option></select></div>
             <div><label>策略间隔秒</label><input id="cfg_auto_policy_interval" value="{view['auto_policy_interval']}"></div>
             <div><label>启动后执行</label><select id="cfg_auto_policy_run_on_start"><option value="true" {view['auto_policy_run_on_start_true']}>开启</option><option value="false" {view['auto_policy_run_on_start_false']}>关闭</option></select></div>
@@ -153,6 +155,10 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
             <div class="meta">说明</div>
             <div class="mono">系统安装完成后会自动运行；不需要手动刷新页面触发。</div>
           </div>
+        </div>
+        <div class="panel" style="margin-top:12px">
+          <div class="meta">策略更换记录</div>
+          <div id="policy_event_log"><div class="empty">暂无更换记录</div></div>
         </div>
       </section>
 
@@ -257,6 +263,7 @@ def build_index_view(values: dict[str, str], state: WebState) -> dict[str, str]:
         "auto_policy_run_on_start_false": "selected" if str(values.get("SUB2API_AUTO_POLICY_RUN_ON_START", "true")).lower() == "false" else "",
         "auto_register_count": html_escape(values.get("SUB2API_AUTO_REGISTER_COUNT", "3")),
         "auto_register_domain": html_escape(values.get("SUB2API_AUTO_REGISTER_DOMAIN", "")),
+        "acc_backend_email_template": html_escape(values.get("ACC_BACKEND_EMAIL_TEMPLATE", "")),
         "auto_register_enabled_true": "selected" if str(values.get("SUB2API_AUTO_REGISTER_ENABLED", "true")).lower() != "false" else "",
         "auto_register_enabled_false": "selected" if str(values.get("SUB2API_AUTO_REGISTER_ENABLED", "true")).lower() == "false" else "",
         "auto_register_threshold": html_escape(values.get("SUB2API_AUTO_REGISTER_THRESHOLD", "1")),

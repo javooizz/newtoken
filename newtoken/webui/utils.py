@@ -24,6 +24,9 @@ def redact_config(values: dict[str, str]) -> dict[str, str]:
             result[f"{key}_MASKED"] = mask_secret_value(result[key])
     proxy_url = result.get("SUB2API_OUTBOUND_PROXY_URL", "")
     result["SUB2API_OUTBOUND_PROXY_URL_MASKED"] = mask_proxy_url(proxy_url)
+    # PUSHPLUS_TOKEN 永不回传明文：脱敏并清空原值
+    result["PUSHPLUS_TOKEN_MASKED"] = mask_secret_value(result.get("PUSHPLUS_TOKEN", ""))
+    result["PUSHPLUS_TOKEN"] = ""
     return result
 
 

@@ -1,4 +1,24 @@
 # Changelog
+## 2026-06-17
+
+### 合并 main 策略层 + 重建自动补号模型
+
+**背景：** `feat/javoo`（含 OIDC 卡密注册引擎）与 `origin/main`（更完善的额度/席位策略层，但脱敏移除了注册引擎）是两套独立源码。本次把 main 的策略层与可观测性合入 feat/javoo，并按 main `README` 的稳定态模型重建自动补号决策。
+
+**改动：**
+
+- **合入 main 策略层**：`enforce_acc_low_quota_policy` 完整轮换（刷额度 / 删 401 / 低额度 ChatGPT→Codex / 6h 冷却 / 母号保护 / ChatGPT 席位收敛 ≤2 / Sub2API active|inactive 同步）；新增 `event_log.py`（策略事件持久化，前端"更换记录"展示最近 300 条）、`notifications.py`（PushPlus 去重告警）、`policy_runner.py`（可观测包装）；`api.py` 新增 `/api/policy/events` 路由。
+- **重建自动补号模型（`auto.py`）**：
+  - **删除错误护栏**：旧逻辑用"ChatGPT 席位数 ≥ K"门控注册，当存在"占席位却不在服务池"的幽灵席位时会永久卡死、不再补号。
+  - **新增幽灵席位清理（Phase 2.5）**：占着 ChatGPT 席位却不在 Sub2API 服务池的成员（"幽灵"）先降为 Codex（符合"永不 remove member"），释放被占满的硬上限。
+  - **补号触发改为按服务号水位**：`need = K(=2) − 池内 active ChatGPT 服务号数`（取自策略层 `active_chatgpt_remote_ids`），不再用旧的"Sub2API alive 数 ≥ threshold"。先降后补（demote-first），任何时刻 ChatGPT 席位 ≤ K，护栏因此不再需要。
+- **OpenAI 传输统一走 curl_cffi + socks5h 代理**：`seat_client.py`（席位接口）、`converter_core.py`（额度校验）、`register.py`（注册）三处，避免纯 TLS 被 Cloudflare 403/reset。
+- **导入修复**：同母号多号共享 workspace `chatgpt_account_id` 会被 codex-session 端点误判重复、只进 1 个；改走 `/accounts/data` 按 user_id/email 去重并绑定 `group_ids`。
+- **远程列表分组过滤**：Sub2API 服务端只认单数 `group=<id>` 过滤（`group_id`/`group_ids` 被忽略），导入/扫描相应适配。
+- **安装标记修复**：`SUB2API_SETUP_DONE` 在配置齐全时仍为 `false` 导致 WebUI 卡在"未安装"，已修正。
+
+**已知待办（未实现）：** 部分号在运行 ~20 次后会**概率性**报 401（首次 codex oauth 的 rt 失效，非每个号都会），需对该号做**第二次 codex oauth（会触发 add-phone 手机验证）续命**并更新池内 rt；当前 `delete_invalidated` 对 401 号直接删除 + 注册新号补位，是一次性消耗模式。add-phone 自动化处理待接入，详见 [docs/13](./docs/13-已知问题与维护要点.md) 第 1 节。
+
 ## 2026-06-15
 
 ### 修复：ACC 导入解析兼容性

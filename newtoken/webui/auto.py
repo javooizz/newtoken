@@ -13,15 +13,20 @@ Requires: curl_cffi for registration (pip install curl_cffi)
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
+from newtoken.acc import seat_client as seat_core
 from newtoken.common.logging_setup import get_logger, log_run_context
-from newtoken.webui.acc import enforce_acc_low_quota_policy
+from newtoken.webui.acc import change_acc_user_seat, enforce_acc_low_quota_policy
+from newtoken.webui.policy_runner import run_observed_policy
 from newtoken.webui.config import WebState
 from newtoken.webui.oidc_client import oidc_generate_cards
 from newtoken.webui.register import register_batch
+from newtoken.sub2api.converter_core import build_export_account, build_export_result
 from newtoken.sub2api.remote import (
+    fetch_remote_account_list,
     import_to_sub2api_codex_session,
     scan_remote_accounts,
 )
@@ -77,11 +82,24 @@ def run_auto_maintenance(state: WebState) -> dict[str, Any]:
         email_domain = str(config.get("SUB2API_AUTO_REGISTER_DOMAIN") or config.get("CHATGPT_RANDOM_EMAIL_DOMAIN") or "").strip()
 
         proxy_url = str(config.get("SUB2API_OUTBOUND_PROXY_URL") or "").strip()
+        mother_email = str(config.get("ACC_MOTHER_ACCOUNT_EMAIL") or "").strip().lower()
+        k_limit = seat_core.CHATGPT_SEAT_LIMIT  # ChatGPT 服务号目标数（硬上限）
+        n_active = None  # 池内真正 active 的 ChatGPT 服务号数（Phase1 enforce 给出，含额度判断）
 
         # ---- Phase 1: low-quota policy ----------------------------------------
+        # main 策略层：刷额度 / 删 401 / 低额度 ChatGPT→Codex / 同步池 active|inactive。
+        # active_chatgpt_remote_ids = ChatGPT 席位且在池 active 且额度足的 runtime id，
+        # 其 len() 即"池内真正在服务的 ChatGPT 号数"——补号决策的唯一依据（README 规则6）。
         try:
-            policy_result = enforce_acc_low_quota_policy(state)
+            policy_result = run_observed_policy(state)
             report["phases"].append({**_auto_phase("seat_policy", start), "result": policy_result})
+            _pr = policy_result if isinstance(policy_result, dict) else {}
+            n_active = len(_pr.get("active_chatgpt_remote_ids") or [])
+            logger.info(
+                "phase=seat_policy ok active_chatgpt=%s/%s seats=%s changed=%s",
+                n_active, k_limit, _pr.get("chatgpt_count", "-"),
+                len(_pr.get("changed_members") or []),
+            )
         except Exception as exc:
             logger.exception("phase=seat_policy 失败")
             report["phases"].append({**_auto_phase("seat_policy", start), "error": str(exc)})
@@ -107,16 +125,62 @@ def run_auto_maintenance(state: WebState) -> dict[str, Any]:
             report["errors"].append(f"remote_scan: {exc}")
             return report
 
-        # ---- Phase 3: check if pool needs replenishment -----------------------
-        alive = int(scan.get("alive_count", 0) or 0)
-        quota_ok = alive - int(scan.get("no_quota_count", 0) or 0)
-        report["pool_status"] = {"alive": alive, "quota_ok": quota_ok, "threshold": auto_cfg["threshold"]}
+        # ---- Phase 2.5: 清理幽灵 ChatGPT 席位（占席位但不在服务池）-------------
+        # README 规则6"先降席位"：占着 ChatGPT 席位却不在 Sub2API group 服务池里的
+        # 成员是"幽灵"——白占 K 硬上限、不产生服务。先把它们降为 Codex（符合"永不删
+        # member"=改席位类型），给真正能服务的新号腾出席位。幽灵本就不在 active 池，
+        # 故此操作不改变 n_active，只是释放被卡住的硬上限。
+        ghost_demoted: list[str] = []
+        try:
+            pool_emails = {
+                str(item.get("name") or item.get("email") or "").strip().lower()
+                for item in fetch_remote_account_list(remote_config, apply_group_filter=True)
+                if isinstance(item, dict)
+            }
+            pool_emails.discard("")
+            client = state.build_seat_client()
+            for user in seat_core.list_all_users(client):
+                email = str(user.get("email") or "").strip()
+                if not email or not seat_core.is_chatgpt_seat_type(user.get("seat_type")):
+                    continue
+                low = email.lower()
+                if low == mother_email or low in pool_emails:
+                    continue
+                try:
+                    change_acc_user_seat(state, str(user.get("id") or ""), email, seat_core.CODEX_SEAT_TYPE)
+                    ghost_demoted.append(email)
+                except Exception:
+                    logger.exception("清幽灵席位失败 email=%s", email)
+            report["phases"].append({**_auto_phase("cleanup_ghost", start),
+                                      "result": {"demoted": ghost_demoted}})
+            if ghost_demoted:
+                logger.info("phase=cleanup_ghost demote=%s -> %s", len(ghost_demoted), ghost_demoted)
+        except Exception as exc:
+            logger.exception("phase=cleanup_ghost 失败")
+            report["phases"].append({**_auto_phase("cleanup_ghost", start), "error": str(exc)})
+            report["errors"].append(f"cleanup_ghost: {exc}")
 
-        if quota_ok >= auto_cfg["threshold"]:
+        # ---- Phase 3: 补号决策 = 目标 K - 池内 active ChatGPT 服务号 -----------
+        if n_active is None:
+            # Phase1 enforce 失败兜底：现查 ACC ChatGPT 席位数（无额度信息，保守估）
+            try:
+                n_active = seat_core.count_chatgpt_seats(
+                    seat_core.list_all_users(state.build_seat_client())
+                )
+            except Exception:
+                logger.exception("phase=register 兜底现查 ChatGPT 席位失败，保守按 0")
+                n_active = 0
+        need = max(0, k_limit - int(n_active or 0))
+        report["pool_status"] = {
+            "active_chatgpt": n_active, "target": k_limit,
+            "ghost_demoted": len(ghost_demoted), "need": need,
+        }
+
+        if need <= 0:
             report["phases"].append({**_auto_phase("replenish", start), "skipped": True,
-                                      "reason": f"quota_ok={quota_ok} >= threshold={auto_cfg['threshold']}"})
+                                      "reason": f"active_chatgpt={n_active} >= target={k_limit}"})
             report["elapsed"] = round(time.time() - start, 2)
-            logger.info("池充足，跳过补号 quota_ok=%s >= threshold=%s", quota_ok, auto_cfg["threshold"])
+            logger.info("池内 active ChatGPT 充足 %s/%s，无需补号", n_active, k_limit)
             return report
         if not auto_cfg["enabled"]:
             report["phases"].append({**_auto_phase("register", start), "skipped": True,
@@ -131,9 +195,11 @@ def run_auto_maintenance(state: WebState) -> dict[str, Any]:
             logger.warning("phase=register 缺少注册域名配置")
             return report
 
-        # ---- Phase 4: register new accounts -----------------------------------
-        register_count = max(1, auto_cfg["count"] - quota_ok)
-        logger.info("开始补号 count=%s", register_count)
+        # ---- Phase 4: register new ChatGPT 服务号 -----------------------------
+        # 已先降幽灵释放席位，register 的号 JIT 以 ChatGPT 入会，入会后席位数 ≤ K，无需护栏。
+        register_count = need
+        logger.info("开始补号 count=%s（池内 active ChatGPT %s/%s，已清幽灵 %s）",
+                    register_count, n_active, k_limit, len(ghost_demoted))
         try:
             register_results = register_batch(
                 register_count, email_domain=email_domain, proxy_url=proxy_url,
@@ -164,18 +230,35 @@ def run_auto_maintenance(state: WebState) -> dict[str, Any]:
             return report
 
         # ---- Phase 5: import to Sub2API ---------------------------------------
+        # 注册号都是同一母号成员、共享 workspace chatgpt_account_id；codex-session
+        # 端点会按它误判重复、只进 1 个。改为把各号 token 转成 sub2api-data，一次性
+        # 走 /accounts/data（按各号 user_id/email 去重 + 绑定 group_ids），同母号
+        # 多号才能正确入池。
         try:
-            import_payloads = [r.token_json for r in ok_results if r.token_json]
-            imported = 0
-            for payload in import_payloads:
+            accounts_for_import = []
+            for r in ok_results:
+                if not r.token_json:
+                    continue
                 try:
-                    import_to_sub2api_codex_session(remote_config, payload)
-                    imported += 1
+                    accounts_for_import.append(build_export_account(json.loads(r.token_json)))
                 except Exception as exc:
-                    logger.exception("phase=import 单条导入失败")
-                    report["phases"].append({**_auto_phase("import", start), "error": str(exc), "payload_preview": payload[:120]})
-            report["phases"].append({**_auto_phase("import", start), "result": {"imported": imported, "total": len(import_payloads)}})
-            logger.info("phase=import imported=%s/%s", imported, len(import_payloads))
+                    logger.exception("phase=import token 转换失败 email=%s", r.email)
+                    report["phases"].append({**_auto_phase("import", start), "error": f"convert {r.email}: {exc}"})
+            created = reused = 0
+            import_result = None
+            if accounts_for_import:
+                data_payload = build_export_result(accounts_for_import)
+                import_result = import_to_sub2api_codex_session(
+                    remote_config, json.dumps(data_payload, ensure_ascii=False)
+                )
+                if isinstance(import_result, dict):
+                    created = int(import_result.get("created", 0) or 0)
+                    reused = int(import_result.get("reused", 0) or 0)
+                report["phases"].append({**_auto_phase("import", start), "result": {
+                    "created": created, "reused": reused, "total": len(accounts_for_import),
+                    "strategy": import_result.get("import_strategy") if isinstance(import_result, dict) else "",
+                }})
+            logger.info("phase=import created=%s reused=%s total=%s", created, reused, len(accounts_for_import))
         except Exception as exc:
             logger.exception("phase=import 失败")
             report["phases"].append({**_auto_phase("import", start), "error": str(exc)})

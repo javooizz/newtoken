@@ -13,6 +13,8 @@ from newtoken.sub2api.remote import build_remote_config, load_remote_import_defa
 from newtoken.common.http_client import apply_proxy_env
 from newtoken.common.runtime import get_app_dir
 from newtoken.webui.tasks import WebTaskStore
+from newtoken.webui.event_log import PolicyEventStore
+from newtoken.webui.notifications import AccCredentialAlertManager
 
 APP_DIR = get_app_dir(__file__)
 ENV_PATH = APP_DIR / ".env"
@@ -25,6 +27,7 @@ SEAT_ACTIONS = {
     "Codex": "usage_based",
 }
 LOW_QUOTA_THRESHOLD_PERCENT = 10.0
+PROMOTION_COOLDOWN_SECONDS = 6 * 60 * 60
 AUTO_POLICY_TASK_LABEL = "low_quota_policy"
 AUTO_MAINTENANCE_TASK_LABEL = "auto_maintenance"
 AUTO_POLICY_DEFAULT_INTERVAL_SECONDS = 300
@@ -251,6 +254,17 @@ class WebState:
         self.last_acc_members: list[dict[str, Any]] = []
         self.last_usage_lookup: dict[str, Any] = {}
         self.oauth_lock = threading.Lock()
+        self.pushplus_token = ""
+        self.policy_lock = threading.Lock()
+        runtime_dir = self.env_path.parent / ".webui-runtime"
+        self.cooldown_path = runtime_dir / "promotion_cooldowns.json"
+        self.blocked_promotions_path = runtime_dir / "blocked_promotions.json"
+        self.policy_events = PolicyEventStore(runtime_dir / "policy_events.json")
+        self.acc_alerts = AccCredentialAlertManager(runtime_dir / "acc_alert_state.json")
+        self.promotion_cooldowns: dict[str, float] = {}
+        self.blocked_promotions: set[str] = set()
+        self._load_promotion_cooldowns()
+        self._load_blocked_promotions()
         self.load_config()
 
     def load_config(self) -> dict[str, str]:
@@ -259,6 +273,7 @@ class WebState:
         values = dict(WEB_DEFAULT_ENV_VALUES)
         values.update(read_env_file(self.env_path))
         self.auth_secret = str(values.get("SUB2API_WEB_SECRET") or "").strip()
+        self.pushplus_token = str(values.get("PUSHPLUS_TOKEN") or "").strip()
         apply_proxy_env(values.get("SUB2API_OUTBOUND_PROXY_URL", ""))
         self._load_acc_credentials(values)
         return values
@@ -266,6 +281,7 @@ class WebState:
     def save_config(self, updates: dict[str, str]) -> dict[str, str]:
         values = self.load_config()
         values.update({key: str(value or "") for key, value in updates.items()})
+        values["SUB2API_IMPORT_CONCURRENCY"] = "5"
         write_env_file(self.env_path, values)
         return self.load_config()
 
@@ -318,12 +334,114 @@ class WebState:
             base_url=seat_core.normalize_base_url(
                 creds["base_url"] or seat_core.DEFAULT_BASE_URL
             ),
+            proxy_url=str(
+                self.load_config().get("SUB2API_OUTBOUND_PROXY_URL", "") or ""
+            ).strip(),
         )
         if not config.access_token and not config.session_token:
             raise SeatApiWebError("缺少 ACC access token 或 session token")
         if not config.account_id:
             raise SeatApiWebError("缺少 ACC account_id")
         return seat_core.SeatClient(config)
+
+    def is_promotion_on_cooldown(self, email: str, now: float) -> bool:
+        normalized_email = str(email or "").strip().lower()
+        if not normalized_email:
+            return True
+        with self.policy_lock:
+            expires_at = float(self.promotion_cooldowns.get(normalized_email) or 0)
+            if expires_at <= now:
+                if self.promotion_cooldowns.pop(normalized_email, None) is not None:
+                    self._write_promotion_cooldowns_locked()
+                return False
+            return True
+
+    def mark_promotion_cooldown(self, email: str, now: float) -> float:
+        normalized_email = str(email or "").strip().lower()
+        if not normalized_email:
+            return 0
+        expires_at = now + PROMOTION_COOLDOWN_SECONDS
+        with self.policy_lock:
+            self.promotion_cooldowns[normalized_email] = expires_at
+            self._write_promotion_cooldowns_locked()
+        return expires_at
+
+    def clear_promotion_cooldown(self, email: str) -> None:
+        normalized_email = str(email or "").strip().lower()
+        if not normalized_email:
+            return
+        with self.policy_lock:
+            if self.promotion_cooldowns.pop(normalized_email, None) is not None:
+                self._write_promotion_cooldowns_locked()
+
+    def is_promotion_permanently_blocked(self, email: str) -> bool:
+        normalized_email = str(email or "").strip().lower()
+        if not normalized_email:
+            return True
+        with self.policy_lock:
+            return normalized_email in self.blocked_promotions
+
+    def block_promotion_permanently(self, email: str) -> None:
+        normalized_email = str(email or "").strip().lower()
+        if not normalized_email:
+            return
+        with self.policy_lock:
+            if normalized_email not in self.blocked_promotions:
+                self.blocked_promotions.add(normalized_email)
+                self._write_blocked_promotions_locked()
+
+    def _load_promotion_cooldowns(self) -> None:
+        try:
+            payload = json.loads(self.cooldown_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return
+        if not isinstance(payload, dict):
+            return
+        loaded: dict[str, float] = {}
+        for email, expires_at in payload.items():
+            normalized_email = str(email or "").strip().lower()
+            try:
+                normalized_expires_at = float(expires_at)
+            except (TypeError, ValueError):
+                continue
+            if normalized_email and normalized_expires_at > 0:
+                loaded[normalized_email] = normalized_expires_at
+        self.promotion_cooldowns = loaded
+
+    def _write_promotion_cooldowns_locked(self) -> None:
+        self.cooldown_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = self.cooldown_path.with_suffix(".tmp")
+        temporary_path.write_text(
+            json.dumps(self.promotion_cooldowns, ensure_ascii=False, sort_keys=True),
+            encoding="utf-8",
+        )
+        temporary_path.replace(self.cooldown_path)
+
+    def _load_blocked_promotions(self) -> None:
+        try:
+            payload = json.loads(self.blocked_promotions_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return
+        if not isinstance(payload, list):
+            return
+        self.blocked_promotions = {
+            str(email or "").strip().lower()
+            for email in payload
+            if str(email or "").strip()
+        }
+
+    def _write_blocked_promotions_locked(self) -> None:
+        self.blocked_promotions_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = self.blocked_promotions_path.with_suffix(".tmp")
+        temporary_path.write_text(
+            json.dumps(sorted(self.blocked_promotions), ensure_ascii=False),
+            encoding="utf-8",
+        )
+        temporary_path.replace(self.blocked_promotions_path)
 
 
 class SeatApiWebError(RuntimeError):

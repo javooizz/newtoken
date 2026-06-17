@@ -61,6 +61,9 @@ SAVE_CONFIG_KEYS = {
     "SUB2API_AUTO_REGISTER_COUNT",
     "SUB2API_AUTO_REGISTER_THRESHOLD",
     "SUB2API_AUTO_REGISTER_DOMAIN",
+    "PUSHPLUS_TOKEN",
+    "ACC_BACKEND_EMAIL_TEMPLATE",
+    "ACC_BACKEND_EMAIL_START_INDEX",
 }
 
 
@@ -87,6 +90,10 @@ def dispatch_api(path: str, payload: dict[str, Any], state: WebState) -> Any:
             str(payload.get("email") or ""),
             seat_type,
         )
+    if path == "/api/policy/events":
+        limit = parse_positive_int(payload.get("limit"), default=100, maximum=300)
+        items = state.policy_events.list_recent(limit)
+        return {"total": len(items), "items": items}
     raise ValueError("未知接口")
 
 

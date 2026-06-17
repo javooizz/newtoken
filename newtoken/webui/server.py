@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -213,6 +214,10 @@ def main(argv: list[str] | None = None) -> int:
     env_path = Path(args.env).resolve() if args.env else ENV_PATH
     state = WebState(env_path)
     values = state.load_config()
+    _outbound_proxy = str(values.get("SUB2API_OUTBOUND_PROXY_URL") or "").strip()
+    if _outbound_proxy:
+        # 供 converter_core 校验/续期对 OpenAI 端走 curl_cffi 指纹+代理（防把有效号误判死）
+        os.environ["SUB2API_OUTBOUND_PROXY_URL"] = _outbound_proxy
     setup_logging(
         level=values.get("SUB2API_LOG_LEVEL"),
         log_dir=values.get("SUB2API_LOG_DIR"),

@@ -113,7 +113,8 @@ location / {
 - 扫描远程账号
 - 低额度账号降级为 Codex
 - ChatGPT 席位收敛到 2 个以内
-- 池子不足时自动注册
+- 清理"幽灵"席位（占 ChatGPT 席位却不在服务池的成员降为 Codex）
+- 池内 active ChatGPT 服务号不足 2 个时自动注册
 - 导入 Sub2API
 - 调用 OIDC 生成卡密
 

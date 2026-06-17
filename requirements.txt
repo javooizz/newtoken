@@ -1,0 +1,5 @@
+# Sub2API WebUI 运行依赖
+# 核心 WebUI / Sub2API 转换导入 / ACC 席位 / 低额度策略：仅用 Python 标准库。
+# 以下第三方依赖用于「自动注册 / Cloudflare 绕过 / ChatGPT 轮换补号」
+# （newtoken/common/cf_client.py、newtoken/webui/register.py）。
+curl_cffi>=0.7.0

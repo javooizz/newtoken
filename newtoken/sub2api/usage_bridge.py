@@ -48,13 +48,17 @@ class Sub2APIUsageSnapshot:
     quota_5h_text: str
     quota_7d_text: str
     usage_updated_at: str
+    quota_31d_text: str = "--"
     quota_5h_remaining_percent: float | None = None
     quota_7d_remaining_percent: float | None = None
+    quota_31d_remaining_percent: float | None = None
     account_status: str = ""
     quota_5h_reset_at: str = ""
     quota_7d_reset_at: str = ""
+    quota_31d_reset_at: str = ""
     quota_5h_reset_after_seconds: int | None = None
     quota_7d_reset_after_seconds: int | None = None
+    quota_31d_reset_after_seconds: int | None = None
 
 
 @dataclass
@@ -254,6 +258,21 @@ def extract_snapshot_from_account_item(account_item: dict[str, Any]) -> Sub2APIU
         account_id = int(account_item.get("id", 0) or 0)
     except (TypeError, ValueError):
         account_id = 0
+    quota_31d_used_percent = None
+    quota_31d_reset_at = ""
+    quota_31d_reset_after_seconds = None
+    for used_percent_key, reset_at_key, reset_after_key in (
+        ("codex_31d_used_percent", "codex_31d_reset_at", "codex_31d_reset_after_seconds"),
+        ("codex_30d_used_percent", "codex_30d_reset_at", "codex_30d_reset_after_seconds"),
+        ("codex_month_used_percent", "codex_month_reset_at", "codex_month_reset_after_seconds"),
+        ("codex_monthly_used_percent", "codex_monthly_reset_at", "codex_monthly_reset_after_seconds"),
+    ):
+        if extra.get(used_percent_key) in (None, ""):
+            continue
+        quota_31d_used_percent = extra.get(used_percent_key)
+        quota_31d_reset_at = str(extra.get(reset_at_key) or "").strip()
+        quota_31d_reset_after_seconds = parse_optional_int(extra.get(reset_after_key))
+        break
     return Sub2APIUsageSnapshot(
         account_id=account_id,
         name=str(account_item.get("name", "")).strip(),
@@ -264,6 +283,7 @@ def extract_snapshot_from_account_item(account_item: dict[str, Any]) -> Sub2APIU
         quota_7d_text=format_remaining_quota_text(
             extra.get("codex_7d_used_percent")
         ),
+        quota_31d_text=format_remaining_quota_text(quota_31d_used_percent),
         usage_updated_at=str(extra.get("codex_usage_updated_at") or "").strip(),
         quota_5h_remaining_percent=calculate_remaining_percent(
             extra.get("codex_5h_used_percent")
@@ -271,15 +291,18 @@ def extract_snapshot_from_account_item(account_item: dict[str, Any]) -> Sub2APIU
         quota_7d_remaining_percent=calculate_remaining_percent(
             extra.get("codex_7d_used_percent")
         ),
+        quota_31d_remaining_percent=calculate_remaining_percent(quota_31d_used_percent),
         account_status=str(account_item.get("status") or "").strip().lower(),
         quota_5h_reset_at=str(extra.get("codex_5h_reset_at") or "").strip(),
         quota_7d_reset_at=str(extra.get("codex_7d_reset_at") or "").strip(),
+        quota_31d_reset_at=quota_31d_reset_at,
         quota_5h_reset_after_seconds=parse_optional_int(
             extra.get("codex_5h_reset_after_seconds")
         ),
         quota_7d_reset_after_seconds=parse_optional_int(
             extra.get("codex_7d_reset_after_seconds")
         ),
+        quota_31d_reset_after_seconds=quota_31d_reset_after_seconds,
     )
 
 
@@ -398,6 +421,7 @@ def set_remote_accounts_inactive(
 
 def refresh_remote_accounts(
     account_ids: list[int] | tuple[int, ...],
+    env_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """批量刷新远程账号 token 和额度快照。"""
 
@@ -415,7 +439,7 @@ def refresh_remote_accounts(
             "skipped": True,
         }
 
-    remote_config, _config_path = load_available_remote_config()
+    remote_config, _config_path = load_available_remote_config(env_path)
     url = build_sub2api_admin_url(remote_config.base_url, SUB2API_BATCH_REFRESH_PATH)
     status_code, body_text, payload = request_json(
         url,

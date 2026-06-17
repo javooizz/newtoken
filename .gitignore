@@ -11,7 +11,11 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .vscode/
+.idea/
 .writerHelper/
+.serena/
+.playwright-mcp/
+.temp/
 build/
 dist/
 startup_error.log

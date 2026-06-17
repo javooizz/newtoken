@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import http.client
 import json
 import os
@@ -31,8 +32,8 @@ DEFAULT_BROWSER_USER_AGENT = (
 )
 DEFAULT_SEAT_UPDATE_RETRY_COUNT = 5
 DEFAULT_SEAT_RETRY_DELAY_SECONDS = 0.5
-DEFAULT_TRANSPORT_RETRY_COUNT = 3
-DEFAULT_TRANSPORT_RETRY_DELAY_SECONDS = 0.5
+DEFAULT_TRANSPORT_RETRY_COUNT = 5
+DEFAULT_TRANSPORT_RETRY_DELAY_SECONDS = 0.6
 DEFAULT_INVITE_ROLE = "standard-user"
 DEFAULT_INVITE_SEAT_TYPE = "usage_based"
 CHATGPT_SEAT_TYPE = "default"
@@ -68,6 +69,7 @@ class Config:
     client_build_number: str
     client_version: str
     base_url: str
+    proxy_url: str = ""
 
 
 class SeatClient:
@@ -102,6 +104,17 @@ class SeatClient:
         payload = {"seat_type": seat_type}
         return self._request_json("PATCH", path, payload)
 
+    def delete_user(self, user_id: str) -> dict[str, Any]:
+        """从 ACC 工作区删除指定成员。"""
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_user_id:
+            raise SeatApiError("缺少待删除成员 user_id")
+        path = (
+            f"/backend-api/accounts/{parse.quote(self.config.account_id)}"
+            f"/users/{parse.quote(normalized_user_id)}"
+        )
+        return self._request_json("DELETE", path)
+
     def invite_user(
         self,
         email: str,
@@ -135,7 +148,32 @@ class SeatClient:
         """发起 HTTP 请求并把 JSON 响应转成字典。"""
         url = f"{self.config.base_url}{path}"
         headers = build_headers(self.config)
-        return request_json_with_retry(url=url, method=method, headers=headers, payload=payload)
+        return request_json_with_retry(
+            url=url,
+            method=method,
+            headers=headers,
+            payload=payload,
+            proxy_url=self.config.proxy_url,
+        )
+
+
+def decode_jwt_payload(token: str) -> dict[str, Any]:
+    """Decode a JWT payload without verifying the signature."""
+    try:
+        payload = str(token or "").split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(payload))
+    except (IndexError, json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def extract_account_id_from_access_token(access_token: str) -> str:
+    """Extract ChatGPT account id from the access token claims when present."""
+    auth_info = decode_jwt_payload(access_token).get("https://api.openai.com/auth", {})
+    if not isinstance(auth_info, dict):
+        return ""
+    return str(auth_info.get("chatgpt_account_id") or auth_info.get("account_id") or "").strip()
 
 
 def normalize_base_url(base_url: str) -> str:
@@ -200,6 +238,54 @@ def open_json_request(
     return request_json_with_retry(url=url, method=method, headers=headers, payload=payload)
 
 
+def _curl_request_text(
+    url: str,
+    *,
+    method: str,
+    headers: dict[str, str] | None,
+    body: bytes | None,
+    proxy_url: str,
+    timeout: float | int = 30,
+) -> tuple[int, str, str, dict[str, str]]:
+    """用 curl_cffi（Chrome 指纹）经 socks5h 代理请求，绕过 chatgpt.com 的 Cloudflare。
+
+    chatgpt.com / auth.openai.com 经 Cloudflare：纯 Python TLS 即使挂代理也会被 403，
+    必须用浏览器 TLS 指纹 + 住宅代理。socks5:// 会本地解析拿到与出口不符的 CF anycast
+    IP 致握手 reset，统一升级 socks5h://（远端解析）。
+    """
+    from curl_cffi import requests as curl_requests
+
+    proxy = str(proxy_url or "").strip()
+    if proxy.startswith("socks5://"):
+        proxy = "socks5h://" + proxy[len("socks5://"):]
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    try:
+        resp = curl_requests.request(
+            method.upper(),
+            url,
+            headers=dict(headers or {}),
+            data=body,
+            proxies=proxies,
+            impersonate="chrome",
+            timeout=timeout,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # curl_cffi 的 SSLError/reset 不在 TRANSIENT_NETWORK_EXCEPTIONS 内；转成
+        # RuntimeError 让 request_json_with_retry 的重试接住（住宅代理偶发 reset）。
+        raise RuntimeError(f"网络请求失败(curl): {exc}") from exc
+    raw_headers: dict[str, str] = {}
+    try:
+        raw_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
+    except Exception:
+        pass
+    return (
+        int(getattr(resp, "status_code", 0) or 0),
+        str(getattr(resp, "reason", "") or ""),
+        str(getattr(resp, "text", "") or ""),
+        raw_headers,
+    )
+
+
 def request_json_with_retry(
     url: str,
     method: str,
@@ -207,8 +293,13 @@ def request_json_with_retry(
     payload: dict[str, Any] | None = None,
     max_attempts: int = DEFAULT_TRANSPORT_RETRY_COUNT,
     retry_delay_seconds: float = DEFAULT_TRANSPORT_RETRY_DELAY_SECONDS,
+    proxy_url: str = "",
 ) -> dict[str, Any]:
-    """发起 JSON 请求，并在瞬时网络异常时自动重试。"""
+    """发起 JSON 请求，并在瞬时网络异常时自动重试。
+
+    proxy_url 非空 → 走 curl_cffi(指纹)+socks5h 代理（OpenAI 接口经 Cloudflare，
+    纯 TLS 会 403/reset）；为空则保持标准 http_request_text（向后兼容 desktop 等调用）。
+    """
     request_headers = dict(headers or {})
     body: bytes | None = None
 
@@ -216,16 +307,26 @@ def request_json_with_retry(
         request_headers["content-type"] = "application/json"
         body = json.dumps(payload).encode("utf-8")
 
+    use_proxy = bool(str(proxy_url or "").strip())
     last_error: BaseException | None = None
 
     for attempt in range(1, max_attempts + 1):
         try:
-            status_code, reason, raw_text, _headers = http_request_text(
-                url,
-                method=method,
-                headers=request_headers,
-                body=body,
-            )
+            if use_proxy:
+                status_code, reason, raw_text, _headers = _curl_request_text(
+                    url,
+                    method=method,
+                    headers=request_headers,
+                    body=body,
+                    proxy_url=proxy_url,
+                )
+            else:
+                status_code, reason, raw_text, _headers = http_request_text(
+                    url,
+                    method=method,
+                    headers=request_headers,
+                    body=body,
+                )
             if status_code < 200 or status_code >= 300:
                 raise SeatApiError(extract_error_message(status_code, reason, raw_text))
             return decode_json_response(raw_text)
@@ -235,7 +336,8 @@ def request_json_with_retry(
             last_error = exc
             if attempt >= max_attempts:
                 break
-            time.sleep(retry_delay_seconds)
+            # 线性退避：住宅代理偶发 reset 突发，拉长重试窗口扛过去（0.6/1.2/1.8/2.4s）
+            time.sleep(retry_delay_seconds * attempt)
 
     if isinstance(last_error, error.URLError):
         raise SeatApiError(f"网络请求失败：{last_error.reason}") from last_error

@@ -31,7 +31,7 @@
 
 | 文档 | 内容 |
 |------|------|
-| [03-自动维护流水线](./03-自动维护流水线.md) | 调度器 `WebScheduler`、后台任务模型 `WebTaskStore`、`run_auto_maintenance` 六阶段逐步详解、低额度降级、补号判定，**含完整时序图** |
+| [03-自动维护流水线](./03-自动维护流水线.md) | 调度器 `WebScheduler`、后台任务模型 `WebTaskStore`、`run_auto_maintenance` 多阶段逐步详解、低额度降级、补号判定，**含完整时序图** |
 | [04-自动注册引擎](./04-自动注册引擎.md) | `register.py` 全流程：curl_cffi TLS 指纹绕 CF、Sentinel PoW 求解器、企业 SSO 免验证码、PKCE OAuth 换 token、批量并发模型，**含注册时序图与反检测技术全汇总** |
 
 ### 🧩 模块详解（逐文件逐函数）
