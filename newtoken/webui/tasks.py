@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import concurrent.futures
+from datetime import datetime
 import secrets
 import threading
 import time
 from typing import Any
 
 MAX_WEB_TASK_WORKERS = 4
+MAX_TASK_LOG_LINES = 120
 
 
 class WebTaskStore:
@@ -24,7 +26,14 @@ class WebTaskStore:
             thread_name_prefix="sub2api-web-task",
         )
 
-    def create(self, label: str, target, *args, **kwargs) -> str:
+    def create(
+        self,
+        label: str,
+        target,
+        *args,
+        task_logger_param: str | None = None,
+        **kwargs,
+    ) -> str:
         normalized_label = str(label or "").strip()
         if not normalized_label:
             raise ValueError("任务名称为空")
@@ -39,6 +48,7 @@ class WebTaskStore:
             "result": None,
             "error": "",
             "reused": False,
+            "logs": [self._format_log_line("任务已创建，等待执行")],
         }
         with self._lock:
             active_task_id = self._active_by_label.get(normalized_label)
@@ -49,17 +59,23 @@ class WebTaskStore:
             self._active_by_label[normalized_label] = task_id
             self._trim_locked()
 
+        call_kwargs = dict(kwargs)
+        if task_logger_param:
+            call_kwargs[task_logger_param] = lambda message: self.append_log(task_id, message)
+
         def runner() -> None:
             with self._lock:
                 task["status"] = "running"
                 task["started_at"] = time.time()
+                self._append_log_locked(task, "任务开始执行")
             try:
-                result = target(*args, **kwargs)
+                result = target(*args, **call_kwargs)
             except Exception as exc:  # noqa: BLE001
                 with self._lock:
                     task["status"] = "error"
                     task["error"] = str(exc)
                     task["finished_at"] = time.time()
+                    self._append_log_locked(task, f"任务失败：{exc}")
                     self._active_by_label.pop(normalized_label, None)
                     self._trim_locked()
                 return
@@ -67,6 +83,7 @@ class WebTaskStore:
                 task["status"] = "done"
                 task["result"] = result
                 task["finished_at"] = time.time()
+                self._append_log_locked(task, "任务执行完成")
                 self._active_by_label.pop(normalized_label, None)
                 self._trim_locked()
 
@@ -77,6 +94,17 @@ class WebTaskStore:
         with self._lock:
             task = self._tasks.get(str(task_id or ""))
             return dict(task) if task else None
+
+    def append_log(self, task_id: str, message: str) -> None:
+        normalized_task_id = str(task_id or "").strip()
+        text = str(message or "").strip()
+        if not normalized_task_id or not text:
+            return
+        with self._lock:
+            task = self._tasks.get(normalized_task_id)
+            if not task:
+                return
+            self._append_log_locked(task, text)
 
     def has_active(self, label: str) -> bool:
         normalized_label = str(label or "").strip()
@@ -132,9 +160,6 @@ class WebTaskStore:
             "no_quota_count",
             "usable_count",
             "total_candidates",
-            "low_quota_count",
-            "chatgpt_count",
-            "chatgpt_limit",
             "deleted",
             "failed",
             "account_created",
@@ -155,4 +180,20 @@ class WebTaskStore:
             "error": task.get("error"),
             "reused": bool(task.get("reused")),
             "result_summary": result_summary,
+            "logs": list(task.get("logs") or [])[-20:],
         }
+
+    @staticmethod
+    def _append_log_locked(task: dict[str, Any], message: str) -> None:
+        logs = task.setdefault("logs", [])
+        if not isinstance(logs, list):
+            logs = []
+            task["logs"] = logs
+        logs.append(WebTaskStore._format_log_line(message))
+        if len(logs) > MAX_TASK_LOG_LINES:
+            del logs[: len(logs) - MAX_TASK_LOG_LINES]
+
+    @staticmethod
+    def _format_log_line(message: str) -> str:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        return f"[{timestamp}] {message}"

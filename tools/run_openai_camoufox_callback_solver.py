@@ -71,6 +71,21 @@ def write_state(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def parse_group_ids_text(raw_value: str) -> list[int]:
+    values: list[int] = []
+    for part in str(raw_value or "").split(","):
+        text = part.strip()
+        if not text:
+            continue
+        try:
+            group_id = int(text)
+        except ValueError:
+            continue
+        if group_id > 0:
+            values.append(group_id)
+    return values
+
+
 def maybe_click(locator) -> bool:
     if locator.count() <= 0 or not locator.is_visible():
         return False
@@ -416,6 +431,7 @@ def main() -> int:
     env = load_env(env_path)
     session_token = env.get("OPENAI_SESSION_TOKEN", "").strip()
     defaults = load_openai_oauth_defaults(str(env_path))
+    oauth_group_ids = parse_group_ids_text(defaults.get("group_ids", ""))
     pending_result = create_openai_oauth_pending_session(
         base_url=defaults.get("base_url", ""),
         admin_api_key=defaults.get("admin_api_key", ""),
@@ -424,7 +440,7 @@ def main() -> int:
         proxy_name=defaults.get("proxy_name", "default"),
         redirect_uri=redirect_uri,
         account_name=account_name,
-        group_ids=[],
+        group_ids=oauth_group_ids,
         group_name=defaults.get("group_name", "cc"),
         concurrency=defaults.get("concurrency", "10"),
     )
@@ -434,6 +450,16 @@ def main() -> int:
     state: dict[str, object] = {
         "stage": "init",
         "auth_url": pending_session.auth_url,
+        "pending_session": {
+            "session_id": pending_session.session_id,
+            "state": pending_session.state,
+            "account_name": pending_session.account_name,
+            "proxy_id": pending_session.proxy_id,
+            "proxy_name": pending_session.proxy_name,
+            "group_ids": list(pending_session.group_ids),
+            "redirect_uri": pending_session.redirect_uri,
+            "concurrency": pending_session.concurrency,
+        },
         "auth_callback_url": "",
         "oidc_authorize_url": "",
         "direct_authorize_result": None,
@@ -532,11 +558,18 @@ def main() -> int:
 
             last_write = 0.0
             deadline = time.time() + 300
+            consent_click_attempted = False
             while time.time() < deadline:
                 if state["callback_url"]:
                     break
                 state["current_page_url"] = page.url
                 state["current_body_text"] = page.locator("body").inner_text(timeout=5000)[:3000]
+                if is_localhost_callback_url(page.url, redirect_uri):
+                    state["callback_url"] = page.url
+                    state["stage"] = "localhost_callback_detected_in_loop"
+                    logs.append({"type": "localhost_callback_in_loop", "url": page.url})
+                    write_state(state_file, {"state": state, "logs": logs})
+                    break
                 if "security verification" in state["current_body_text"].lower():
                     strategy = try_click_strategies(page)
                     if strategy:
@@ -551,14 +584,17 @@ def main() -> int:
                         'button:has-text("继续")',
                         'button:has-text("同意")',
                     ):
+                        if consent_click_attempted:
+                            break
                         if maybe_click(page.locator(selector).first):
                             logs.append({"type": "clicked_consent", "selector": selector})
+                            consent_click_attempted = True
                             break
                 now = time.time()
                 if now - last_write >= 3:
                     write_state(state_file, {"state": state, "logs": logs})
                     last_write = now
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(1000)
 
             if not state["callback_url"] and is_localhost_callback_url(page.url, redirect_uri):
                 state["callback_url"] = page.url

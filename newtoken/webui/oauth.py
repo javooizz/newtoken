@@ -16,8 +16,8 @@ import newtoken.acc.seat_client as seat_core
 
 from newtoken.sub2api.remote_oauth import (
     DEFAULT_OAUTH_REDIRECT_URI,
+    PendingOpenAIOAuthSession,
     complete_openai_oauth_account_creation,
-    create_openai_oauth_pending_session,
     generate_random_oauth_account_name,
     load_openai_oauth_defaults,
     normalize_oauth_concurrency,
@@ -89,12 +89,21 @@ def start_oauth_flow(state: WebState, form: dict[str, str]) -> dict[str, Any]:
     return build_oauth_status(state, include_auth_url=True)
 
 
-def start_blind_oauth_import(state: WebState, form: dict[str, str]) -> dict[str, Any]:
+def start_blind_oauth_import(
+    state: WebState,
+    form: dict[str, str],
+    *,
+    _task_logger=None,
+) -> dict[str, Any]:
     """Run the full server-side OAuth import flow for screen-reader use."""
 
+    emit = _task_logger or (lambda _message: None)
+    emit("开始检查席位限制和并发任务")
     _assert_blind_oauth_import_allowed(state)
     login_email = _build_random_login_email(state)
     account_name = generate_random_oauth_account_name(prefix="openai-blind")
+    emit(f"随机登录邮箱：{login_email}")
+    emit(f"随机账号名：{account_name}")
     runtime_dir = state.env_path.parent / ".webui-runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     task_suffix = str(time.time_ns())
@@ -109,7 +118,7 @@ def start_blind_oauth_import(state: WebState, form: dict[str, str]) -> dict[str,
             "SUB2API_OAUTH_PROXY_ID": form.get("proxy_id") or defaults.get("proxy_id", ""),
             "SUB2API_OAUTH_PROXY_URL": form.get("proxy_url") or defaults.get("proxy_url", ""),
             "SUB2API_OAUTH_GROUP_IDS": form.get("group_ids") or defaults.get("group_ids", ""),
-            "SUB2API_OAUTH_GROUP_NAME": form.get("group_name") or defaults.get("group_name", "cc"),
+            "SUB2API_OAUTH_GROUP_NAME": defaults.get("group_name", "cc"),
             "SUB2API_OAUTH_ACCOUNT_CONCURRENCY": str(
                 normalize_oauth_concurrency(
                     form.get("concurrency") or defaults.get("concurrency", "")
@@ -118,6 +127,7 @@ def start_blind_oauth_import(state: WebState, form: dict[str, str]) -> dict[str,
         }
     )
     write_env_file(temp_env_path, merged_env)
+    emit("已生成本次自动链临时配置")
 
     command = [sys.executable, "tools/run_openai_camoufox_callback_solver.py"]
     app_dir = state.env_path.parent
@@ -138,16 +148,95 @@ def start_blind_oauth_import(state: WebState, form: dict[str, str]) -> dict[str,
     )
 
     try:
-        process = subprocess.run(
+        emit("开始执行一键注册登录导入脚本")
+        process = subprocess.Popen(
             command,
             cwd=str(app_dir),
             env=env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=1800,
-            check=False,
         )
+        last_stage = ""
+        last_page = ""
+        callback_logged = False
+        deadline = time.time() + 1800
+        while process.poll() is None:
+            if time.time() > deadline:
+                process.kill()
+                raise RuntimeError("自动链执行超时")
+            payload = _read_blind_oauth_state(state_file)
+            state_payload = payload.get("state") if isinstance(payload.get("state"), dict) else {}
+            stage = str(state_payload.get("stage") or "").strip()
+            page_url = str(state_payload.get("current_page_url") or "").strip()
+            callback_url = str(state_payload.get("callback_url") or "").strip()
+            result = payload.get("result") if isinstance(payload.get("result"), dict) else None
+            if stage and stage != last_stage:
+                emit(f"阶段：{stage}")
+                last_stage = stage
+            if page_url and page_url != last_page:
+                emit(f"页面：{page_url}")
+                last_page = page_url
+            if callback_url and not callback_logged:
+                emit("已拿到 localhost callback，正在回填 Sub2API")
+                callback_logged = True
+            if callback_url and not (
+                stage == "import_completed"
+                and isinstance(result, dict)
+                and int(result.get("account_id", 0) or 0) > 0
+            ):
+                remote_config = state.build_remote_config()
+                pending_session = _pending_session_from_state_payload(
+                    payload,
+                    fallback_account_name=account_name,
+                )
+                forced_result = _complete_blind_oauth_from_callback(
+                    state,
+                    remote_config,
+                    pending_session,
+                    callback_url,
+                    login_email,
+                    account_name,
+                    emit,
+                )
+                try:
+                    process.terminate()
+                    process.wait(timeout=5)
+                except Exception:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+                return forced_result
+            if stage == "import_completed" and isinstance(result, dict) and int(result.get("account_id", 0) or 0) > 0:
+                emit(f"已导入 Sub2API，账号 ID：{result.get('account_id')}")
+                result["account_created"] = 1
+                result["account_failed"] = 0
+                result["login_email"] = login_email
+                result["account_name"] = account_name
+                state.map_blind_oauth_account(
+                    int(result.get("account_id", 0) or 0),
+                    login_email,
+                )
+                try:
+                    process.terminate()
+                    process.wait(timeout=5)
+                except Exception:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+                return result
+            time.sleep(1)
+        stdout_text, stderr_text = process.communicate()
         payload = _read_blind_oauth_state(state_file)
+        state_payload = payload.get("state") if isinstance(payload.get("state"), dict) else {}
+        stage = str(state_payload.get("stage") or "").strip()
+        page_url = str(state_payload.get("current_page_url") or "").strip()
+        if stage and stage != last_stage:
+            emit(f"阶段：{stage}")
+        if page_url and page_url != last_page:
+            emit(f"页面：{page_url}")
         if process.returncode == 0:
             result = payload.get("result") if isinstance(payload, dict) else None
             if isinstance(result, dict) and int(result.get("account_id", 0) or 0) > 0:
@@ -155,8 +244,9 @@ def start_blind_oauth_import(state: WebState, form: dict[str, str]) -> dict[str,
                 result["account_failed"] = 0
                 result["login_email"] = login_email
                 result["account_name"] = account_name
+                emit(f"已导入 Sub2API，账号 ID：{result.get('account_id')}")
                 return result
-        raise RuntimeError(_build_blind_oauth_error(process.returncode, payload, process.stdout, process.stderr))
+        raise RuntimeError(_build_blind_oauth_error(process.returncode, payload, stdout_text, stderr_text))
     finally:
         try:
             temp_env_path.unlink(missing_ok=True)
@@ -236,6 +326,64 @@ def _build_blind_oauth_error(
     if stage:
         return f"自动链失败：{stage} | {detail}"
     return f"自动链失败：{detail}"
+
+
+def _pending_session_from_state_payload(
+    payload: dict[str, Any],
+    *,
+    fallback_account_name: str,
+) -> PendingOpenAIOAuthSession:
+    state_payload = payload.get("state") if isinstance(payload.get("state"), dict) else {}
+    pending_raw = (
+        state_payload.get("pending_session")
+        if isinstance(state_payload.get("pending_session"), dict)
+        else {}
+    )
+    session_id = str(pending_raw.get("session_id") or "").strip()
+    state = str(pending_raw.get("state") or "").strip()
+    auth_url = str(state_payload.get("auth_url") or "").strip()
+    redirect_uri = str(pending_raw.get("redirect_uri") or DEFAULT_OAUTH_REDIRECT_URI).strip()
+    if not session_id or not state or not auth_url:
+        raise RuntimeError("自动链状态文件缺少 pending session 信息，无法继续回填 Sub2API")
+    return PendingOpenAIOAuthSession(
+        session_id=session_id,
+        state=state,
+        auth_url=auth_url,
+        account_name=str(pending_raw.get("account_name") or fallback_account_name).strip() or fallback_account_name,
+        proxy_id=pending_raw.get("proxy_id"),
+        proxy_name=str(pending_raw.get("proxy_name") or "").strip(),
+        group_ids=[int(item) for item in (pending_raw.get("group_ids") or []) if int(item) > 0],
+        redirect_uri=redirect_uri,
+        concurrency=int(pending_raw.get("concurrency") or normalize_oauth_concurrency("10")),
+    )
+
+
+def _complete_blind_oauth_from_callback(
+    state: WebState,
+    remote_config,
+    pending_session: PendingOpenAIOAuthSession,
+    callback_url: str,
+    login_email: str,
+    account_name: str,
+    emit,
+) -> dict[str, Any]:
+    emit("父任务直接回填 Sub2API")
+    result = complete_openai_oauth_account_creation(
+        remote_config=remote_config,
+        pending_session=pending_session,
+        auth_input=callback_url,
+        target_status="active",
+    )
+    result["account_created"] = 1
+    result["account_failed"] = 0
+    result["login_email"] = login_email
+    result["account_name"] = account_name
+    state.map_blind_oauth_account(
+        int(result.get("account_id", 0) or 0),
+        login_email,
+    )
+    emit(f"已导入 Sub2API，账号 ID：{result.get('account_id')}")
+    return result
 
 
 def _parse_group_ids(group_ids_text: str) -> list[int]:

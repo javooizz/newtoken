@@ -81,6 +81,8 @@ tr:last-child td { border-bottom: 0; }
 .task { border: 1px solid var(--line); border-radius: 8px; background: white; padding: 10px; display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .task strong { font-size: 13px; }
 .task small { color: var(--muted); }
+.task-logs { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); display: grid; gap: 4px; }
+.task-log-line { font-size: 12px; color: var(--muted); white-space: normal; word-break: break-word; }
 .empty { color: var(--muted); padding: 14px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); }
 @media (max-width: 1280px) {
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -193,17 +195,7 @@ function replaceSelectOptions(id, options, currentValue) {
   el.dataset.current = el.value;
 }
 function syncOauthProxyName(proxyOptions, selectedProxyId='') {
-  const proxySelect = byId('oauth_proxy_id');
-  const groupSelect = byId('oauth_group_name');
-  if (!proxySelect || !groupSelect) return;
-  if (selectedProxyId) {
-    const proxyOption = Array.from(proxySelect.options || []).find(option => option.value === String(selectedProxyId));
-    if (proxyOption) {
-      const label = String(proxyOption.textContent || '');
-      groupSelect.value = label.split(' (#', 1)[0].trim() || groupSelect.value;
-      groupSelect.dataset.current = groupSelect.value;
-    }
-  }
+  return;
 }
 async function api(path, body={}) {
   const res = await fetch(withBase(path), {
@@ -271,7 +263,6 @@ async function loadRemoteResources(silent=false) {
     replaceSelectOptions('cfg_proxy_id', proxies, byId('cfg_proxy_id')?.dataset.current || formValue('cfg_proxy_id'));
     replaceSelectOptions('oauth_group_ids', groups, byId('oauth_group_ids')?.dataset.current || formValue('oauth_group_ids'));
     replaceSelectOptions('oauth_proxy_id', proxies, byId('oauth_proxy_id')?.dataset.current || formValue('oauth_proxy_id'));
-    replaceSelectOptions('oauth_group_name', [{value: 'cc', label: 'cc'}].concat(groups.map(item => ({value: String(item.label || item.value || ''), label: String(item.label || item.value || '')}))), byId('oauth_group_name')?.dataset.current || formValue('oauth_group_name'));
     syncOauthProxyName(proxies, byId('oauth_proxy_id')?.value || '');
     if (!silent) setText('config_status', '分组和代理已刷新');
   } catch(e) {
@@ -295,7 +286,6 @@ async function startTask(action) {
       proxy_id: formValue('oauth_proxy_id'),
       proxy_url: formValue('oauth_proxy_url'),
       group_ids: formValue('oauth_group_ids'),
-      group_name: formValue('oauth_group_name'),
       concurrency: formValue('oauth_concurrency')
     });
     const taskId = data.task_id || (data.result && data.result.task_id);
@@ -392,7 +382,6 @@ async function startOauth() {
       proxy_id: formValue('oauth_proxy_id'),
       proxy_url: formValue('oauth_proxy_url'),
       group_ids: formValue('oauth_group_ids'),
-      group_name: formValue('oauth_group_name'),
       concurrency: formValue('oauth_concurrency')
     });
     const result = data.result || {};
@@ -589,6 +578,17 @@ function renderSchedulerStatus(scheduler) {
     : ` | 下次 ${formatSchedulerTime(status.next_run_at)}`;
   el.textContent = `自动策略：${status.interval_seconds || '--'}s${suffix}`;
 }
+function renderBlindOauthTask(task) {
+  const container = byId('oauth_blind_log');
+  if (!container) return;
+  if (!task) {
+    container.innerHTML = '<div class="empty">等待一键导入任务开始</div>';
+    return;
+  }
+  const logs = (task.logs || []).map(line => `<div class="task-log-line">${esc(line)}</div>`).join('');
+  const summary = Object.entries(task.result_summary || {}).map(([k, v]) => `${k}:${v}`).join(' ');
+  container.innerHTML = `<div class="task"><div><strong>${esc(actionNames[task.label] || task.label)}</strong><br><small>${esc(summary || task.error || task.id)}</small>${logs ? `<div class="task-logs">${logs}</div>` : ''}</div><div><span class="pill">${esc(task.status)}</span><br><small>${formatTaskTime(task)}</small></div></div>`;
+}
 async function loadTasks() {
   const res = await fetch(withBase('/api/tasks/list'));
   const data = await res.json();
@@ -596,13 +596,17 @@ async function loadTasks() {
   const tasks = data.tasks || [];
   blindOauthTaskBlocked = tasks.some(task => task.label === 'oauth_blind_import' && ['queued', 'running'].includes(task.status));
   updateBlindOauthButton();
-  if (!tasks.length) {
+  const blindTask = tasks.find(task => task.label === 'oauth_blind_import') || null;
+  renderBlindOauthTask(blindTask);
+  const normalTasks = tasks.filter(task => task.label !== 'oauth_blind_import');
+  if (!normalTasks.length) {
     byId('task_log').innerHTML = '<div class="empty">暂无任务</div>';
     return;
   }
-  byId('task_log').innerHTML = '<div class="task-list">' + tasks.slice(0, 12).map(task => {
+  byId('task_log').innerHTML = '<div class="task-list">' + normalTasks.slice(0, 12).map(task => {
     const summary = Object.entries(task.result_summary || {}).map(([k, v]) => `${k}:${v}`).join(' ');
-    return `<div class="task"><div><strong>${esc(actionNames[task.label] || task.label)}</strong><br><small>${esc(summary || task.error || task.id)}</small></div><div><span class="pill">${esc(task.status)}</span><br><small>${formatTaskTime(task)}</small></div></div>`;
+    const logs = (task.logs || []).map(line => `<div class="task-log-line">${esc(line)}</div>`).join('');
+    return `<div class="task"><div><strong>${esc(actionNames[task.label] || task.label)}</strong><br><small>${esc(summary || task.error || task.id)}</small>${logs ? `<div class="task-logs">${logs}</div>` : ''}</div><div><span class="pill">${esc(task.status)}</span><br><small>${formatTaskTime(task)}</small></div></div>`;
   }).join('') + '</div>';
 }
 function formatEventTime(ts) {

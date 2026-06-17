@@ -258,7 +258,13 @@ def start_named_task(state: WebState, payload: dict[str, Any]) -> str:
         if state.tasks.has_active(action):
             raise ValueError("当前已有一键建号任务正在运行，请等上一条结束后再试")
         form = {key: str(value or "") for key, value in payload.items()}
-        return state.tasks.create(action, start_blind_oauth_import, state, form)
+        return state.tasks.create(
+            action,
+            start_blind_oauth_import,
+            state,
+            form,
+            task_logger_param="_task_logger",
+        )
     if action == "privacy":
         return state.tasks.create(
             action,

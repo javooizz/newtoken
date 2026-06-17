@@ -185,7 +185,6 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
         <div><label>远程代理 ID</label><select id="oauth_proxy_id" data-current="{view['oauth_proxy_id']}"><option value="{view['oauth_proxy_id']}">{view['oauth_proxy_id_label']}</option></select></div>
         <div><label>备用代理 URL</label><input id="oauth_proxy_url" value="{view['oauth_proxy_url']}"></div>
         <div><label>分组 ID</label><select id="oauth_group_ids" data-current="{view['oauth_group_ids']}"><option value="{view['oauth_group_ids']}">{view['oauth_group_ids_label']}</option></select></div>
-        <div><label>分组名</label><select id="oauth_group_name" data-current="{view['oauth_group_name']}"><option value="{view['oauth_group_name']}">{view['oauth_group_name_label']}</option></select></div>
         <div><label>账号并发</label><input id="oauth_concurrency" value="{view['oauth_concurrency']}"></div>
       </div>
       <div class="toolbar">
@@ -204,6 +203,10 @@ def build_index_html(values: dict[str, str], state: WebState) -> str:
           <input id="oauth_auth_input" placeholder="粘贴完整回调链接或 code" style="flex:1">
           <button class="secondary" onclick="manualCompleteOauth()">使用手动 Code 完成</button>
         </div>
+      </div>
+      <div style="margin-top:12px">
+        <label>一键注册登录导入 Sub2API 专属日志</label>
+        <div id="oauth_blind_log"><div class="empty">等待一键导入任务开始</div></div>
       </div>
     </section>
 
