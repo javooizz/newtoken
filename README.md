@@ -13,7 +13,7 @@ Sub2API ACC WebUI 是一个轻量级 Linux Web 控制台，用来管理 Sub2API 
 - 冷却机制：正常轮换下场的账号进入 6 小时冷却期，冷却结束后才允许再次上场。
 - 可用 ACC 后备池：只在可用 ACC 后备账号少于 3 个时新增账号；不会因为 ChatGPT 席位少于 3 个而新增账号。
 - 401 清理：发现 `401/token_invalidated` 时，先删 ACC 成员，再删 Sub2API 账号；ACC 删除失败则永久禁止补位。
-- 母号保护：母号 `user-s48XGo8NpCt5xv9XoI3b0w4z` 永远不能改为 ChatGPT。
+- 母号保护：母号 永远不能改为 ChatGPT。
 - Sub2API 管理：扫描远程账号、同步隐私、删除 401、删除无额度、删除死号。
 - 导入工具：本地账号 JSON 转换校验、复制缓存、上传缓存、粘贴 JSON 导入。
 - 推送告警：ACC 凭证过期或失效时通过 PushPlus 去重推送，恢复后自动重置告警状态。
