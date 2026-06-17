@@ -1,6 +1,14 @@
 # Changelog
 ## 2026-06-17
 
+### proxy_id 绑定修复 + 30s 周期 + 401 根因实验
+
+**改动：**
+
+- **修复 proxy_id 未绑定（commit `f0398ec`）**：走 `/accounts/data` 导入时 proxy_id 不在导入体内生效（`ImportData` 不读该字段），须随 `group_ids` 一起进 post-import bulk-update payload——`build_openai_post_import_update_payload` 原先漏了 proxy_id。修复后导入号正确绑定 `SUB2API_PROXY_ID`，号被 Sub2API 调用时走与母号/注册一致的出口代理（生产 `GET /accounts/9748 → proxy_id=33` 验证落库）。
+- **维护周期下限 60→30s（commit `9f13dd2`）**：`AUTO_POLICY_MIN_INTERVAL_SECONDS` 调至 30，对齐 main 默认，支持高频轮换/观察。
+- **401 根因实验结论**：曾假设 401 源于号被调用 IP ≠ 注册 IP，绑母号同代理（proxy_id=33）后实测**号仍大量 401**——IP 一致非主因，根因回到 **rt 概率性短命**；真正稳定仍需 401 续命（二次 codex oauth + add-phone，详见 [docs/13](./docs/13-已知问题与维护要点.md)「401 号续命」节）。
+
 ### 合并 main 策略层 + 重建自动补号模型
 
 **背景：** `feat/javoo`（含 OIDC 卡密注册引擎）与 `origin/main`（更完善的额度/席位策略层，但脱敏移除了注册引擎）是两套独立源码。本次把 main 的策略层与可观测性合入 feat/javoo，并按 main `README` 的稳定态模型重建自动补号决策。
